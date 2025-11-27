@@ -81,10 +81,15 @@ const portal = await stripeClient.createCustomerPortalSession(ctx, {
 ### Subscription Management
 
 ```typescript
-// Cancel subscription
+// Cancel subscription (at period end)
 await stripeClient.cancelSubscription(ctx, {
   stripeSubscriptionId: "sub_...",
   cancelAtPeriodEnd: true, // false = cancel immediately
+});
+
+// Reactivate a subscription set to cancel
+await stripeClient.reactivateSubscription(ctx, {
+  stripeSubscriptionId: "sub_...",
 });
 
 // Update seat count
@@ -120,6 +125,12 @@ const invoices = await ctx.runQuery(
   components.stripe.public.listInvoices,
   { stripeCustomerId: "cus_..." }
 );
+
+// List invoices for an organization
+const orgInvoices = await ctx.runQuery(
+  components.stripe.public.listInvoicesByOrgId,
+  { orgId: "org_..." }
+);
 ```
 
 ### Webhook Handling
@@ -132,7 +143,9 @@ import { registerRoutes } from "@convex/stripe";
 
 const http = httpRouter();
 
+// Webhook URL will be: https://<deployment>.convex.site/stripe/webhook
 registerRoutes(http, components.stripe, {
+  webhookPath: "/stripe/webhook",
   // Custom handlers for specific events
   events: {
     "customer.subscription.updated": async (ctx, event) => {
@@ -155,7 +168,10 @@ Set these in [Convex Dashboard](https://dashboard.convex.dev) → Settings → E
 ```
 STRIPE_SECRET_KEY=sk_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
+APP_URL=http://localhost:5173
 ```
+
+The `APP_URL` is used for Stripe checkout success/cancel redirects.
 
 ## Component Tables
 

@@ -52,9 +52,9 @@ Add these to your [Convex Dashboard](https://dashboard.convex.dev) → Settings 
 2. Click **"Add endpoint"**
 3. Enter your webhook URL:
    ```
-   https://<your-convex-deployment>.convex.cloud/stripe-webhooks
+   https://<your-convex-deployment>.convex.site/stripe/webhook
    ```
-   (Find your deployment URL in the Convex dashboard)
+   (Find your deployment name in the Convex dashboard - it's the part before `.convex.cloud` in your URL)
 4. Select these events:
    - `customer.created`
    - `customer.updated`
@@ -82,8 +82,10 @@ import { registerRoutes } from "@convex/stripe";
 
 const http = httpRouter();
 
-// Register Stripe webhook handler
-registerRoutes(http, components.stripe);
+// Register Stripe webhook handler at /stripe/webhook
+registerRoutes(http, components.stripe, {
+  webhookPath: "/stripe/webhook",
+});
 
 export default http;
 ```
@@ -180,6 +182,7 @@ const stripeClient = new StripeSubscriptions(components.stripe, {
 | `createCustomer()` | Create a new Stripe customer |
 | `getOrCreateCustomer()` | Get existing or create new customer |
 | `cancelSubscription()` | Cancel a subscription |
+| `reactivateSubscription()` | Reactivate a subscription set to cancel |
 | `updateSubscriptionQuantity()` | Update seat count |
 
 ### createCheckoutSession
@@ -248,6 +251,8 @@ export const getUserPayments = query({
 | `listPaymentsByUserId` | `userId` | List payments for a user |
 | `listPaymentsByOrgId` | `orgId` | List payments for an org |
 | `listInvoices` | `stripeCustomerId` | List invoices for a customer |
+| `listInvoicesByUserId` | `userId` | List invoices for a user |
+| `listInvoicesByOrgId` | `orgId` | List invoices for an org |
 
 ## Webhook Events
 
@@ -344,6 +349,8 @@ The component creates these tables in its namespace:
 | `amountDue` | number | Amount due |
 | `amountPaid` | number | Amount paid |
 | `created` | number | Created timestamp |
+| `userId` | string? | Linked user ID |
+| `orgId` | string? | Linked org ID |
 
 ## Example App
 
@@ -403,7 +410,7 @@ Ensure your auth provider is configured:
 
 Check the Convex logs in your dashboard for errors. Common issues:
 - Missing `STRIPE_WEBHOOK_SECRET`
-- Wrong webhook URL (should end with `/stripe-webhooks`)
+- Wrong webhook URL (should be `https://<deployment>.convex.site/stripe/webhook`)
 - Missing events in webhook configuration
 
 ## License

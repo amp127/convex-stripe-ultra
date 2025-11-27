@@ -6,7 +6,9 @@ import { registerRoutes } from "@convex/stripe";
 const http = httpRouter();
 
 // Register Stripe webhooks with custom event handlers
+// Webhook URL: https://<deployment>.convex.site/stripe/webhook
 registerRoutes(http, components.stripe, {
+  webhookPath: "/stripe/webhook",
   events: {
     "customer.subscription.updated": async (
       ctx: any,

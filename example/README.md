@@ -109,12 +109,13 @@ npx convex dev --once
 
 3. Enter your Convex webhook URL:
    ```
-   https://YOUR_CONVEX_DEPLOYMENT.convex.cloud/stripe-webhooks
+   https://YOUR_CONVEX_DEPLOYMENT.convex.site/stripe/webhook
    ```
    
-   Find your deployment URL in the Convex dashboard or in `.env.local`:
+   Find your deployment name in the Convex dashboard. It's the part before `.convex.cloud` in your URL:
    ```
    VITE_CONVEX_URL=https://YOUR_CONVEX_DEPLOYMENT.convex.cloud
+   # Webhook URL uses .convex.site instead: YOUR_CONVEX_DEPLOYMENT.convex.site/stripe/webhook
    ```
 
 4. Select these events:
@@ -181,11 +182,15 @@ example/
 Contains all the Stripe integration logic:
 - `createSubscriptionCheckout` - Create subscription checkout
 - `createPaymentCheckout` - Create one-time payment checkout
+- `createTeamSubscriptionCheckout` - Create team/org subscription checkout
 - `cancelSubscription` - Cancel a subscription
+- `reactivateSubscription` - Reactivate a canceled subscription
 - `updateSeats` - Update subscription quantity
 - `getCustomerPortalUrl` - Get customer portal URL
 - `getUserSubscriptions` - List user's subscriptions
 - `getUserPayments` - List user's payments
+- `getOrgSubscription` - Get org's subscription
+- `getOrgInvoices` - List org's invoices
 
 ### `convex/http.ts`
 
@@ -193,10 +198,11 @@ Registers the Stripe webhook handler with optional custom event handlers.
 
 ### `src/App.tsx`
 
-React app with three pages:
+React app with four pages:
 - **Home** - Landing page with product showcase
-- **Store** - Product cards with purchase buttons
+- **Store** - Product cards with purchase buttons (single-user subscriptions)
 - **Profile** - Order history and subscription management
+- **Team** - Team/organization billing with seat-based subscriptions
 
 ## Troubleshooting
 
