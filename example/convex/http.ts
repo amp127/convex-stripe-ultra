@@ -1,7 +1,7 @@
 import { httpRouter } from "convex/server";
 import type Stripe from "stripe";
 import { components } from "./_generated/api";
-import { registerRoutes } from "@convex/stripe";
+import { registerRoutes } from "@convex-dev/stripe";
 
 const http = httpRouter();
 
