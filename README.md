@@ -1,6 +1,7 @@
 # @convex-dev/stripe
 
-A Convex component for integrating Stripe payments, subscriptions, and billing into your Convex application.
+A Convex component for integrating Stripe payments, subscriptions, and billing
+into your Convex application.
 
 [![npm version](https://badge.fury.io/js/@convex-dev%2Fstripe.svg)](https://badge.fury.io/js/@convex-dev%2Fstripe)
 
@@ -11,8 +12,10 @@ A Convex component for integrating Stripe payments, subscriptions, and billing i
 - 👥 **Customer Management** - Automatic customer creation and linking
 - 💳 **Customer Portal** - Let users manage their billing
 - 🪑 **Seat-Based Pricing** - Update subscription quantities for team billing
-- 🔗 **User/Org Linking** - Link payments and subscriptions to users or organizations
-- 🔔 **Webhook Handling** - Automatic sync of Stripe data to your Convex database
+- 🔗 **User/Org Linking** - Link payments and subscriptions to users or
+  organizations
+- 🔔 **Webhook Handling** - Automatic sync of Stripe data to your Convex
+  database
 - 📊 **Real-time Data** - Query payments, subscriptions, invoices in real-time
 
 ## Quick Start
@@ -41,10 +44,10 @@ export default app;
 
 Add these to your [Convex Dashboard](https://dashboard.convex.dev) → Settings → Environment Variables:
 
-| Variable | Description |
-|----------|-------------|
-| `STRIPE_SECRET_KEY` | Your Stripe secret key (`sk_test_...` or `sk_live_...`) |
-| `STRIPE_WEBHOOK_SECRET` | Webhook signing secret (`whsec_...`) - see Step 4 |
+| Variable                | Description                                             |
+| ----------------------- | ------------------------------------------------------- |
+| `STRIPE_SECRET_KEY`     | Your Stripe secret key (`sk_test_...` or `sk_live_...`) |
+| `STRIPE_WEBHOOK_SECRET` | Webhook signing secret (`whsec_...`) - see Step 4       |
 
 ### 4. Configure Stripe Webhooks
 
@@ -215,10 +218,10 @@ export const getUserSubscriptions = query({
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return [];
-    
+
     return await ctx.runQuery(
       components.stripe.public.listSubscriptionsByUserId,
-      { userId: identity.subject }
+      { userId: identity.subject },
     );
   },
 });
@@ -229,49 +232,48 @@ export const getUserPayments = query({
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return [];
-    
-    return await ctx.runQuery(
-      components.stripe.public.listPaymentsByUserId,
-      { userId: identity.subject }
-    );
+
+    return await ctx.runQuery(components.stripe.public.listPaymentsByUserId, {
+      userId: identity.subject,
+    });
   },
 });
 ```
 
 ### Available Public Queries
 
-| Query | Arguments | Description |
-|-------|-----------|-------------|
-| `getCustomer` | `stripeCustomerId` | Get a customer by Stripe ID |
-| `listSubscriptions` | `stripeCustomerId` | List subscriptions for a customer |
-| `listSubscriptionsByUserId` | `userId` | List subscriptions for a user |
-| `getSubscription` | `stripeSubscriptionId` | Get a subscription by ID |
-| `getSubscriptionByOrgId` | `orgId` | Get subscription for an org |
-| `getPayment` | `stripePaymentIntentId` | Get a payment by ID |
-| `listPayments` | `stripeCustomerId` | List payments for a customer |
-| `listPaymentsByUserId` | `userId` | List payments for a user |
-| `listPaymentsByOrgId` | `orgId` | List payments for an org |
-| `listInvoices` | `stripeCustomerId` | List invoices for a customer |
-| `listInvoicesByUserId` | `userId` | List invoices for a user |
-| `listInvoicesByOrgId` | `orgId` | List invoices for an org |
+| Query                       | Arguments               | Description                       |
+| --------------------------- | ----------------------- | --------------------------------- |
+| `getCustomer`               | `stripeCustomerId`      | Get a customer by Stripe ID       |
+| `listSubscriptions`         | `stripeCustomerId`      | List subscriptions for a customer |
+| `listSubscriptionsByUserId` | `userId`                | List subscriptions for a user     |
+| `getSubscription`           | `stripeSubscriptionId`  | Get a subscription by ID          |
+| `getSubscriptionByOrgId`    | `orgId`                 | Get subscription for an org       |
+| `getPayment`                | `stripePaymentIntentId` | Get a payment by ID               |
+| `listPayments`              | `stripeCustomerId`      | List payments for a customer      |
+| `listPaymentsByUserId`      | `userId`                | List payments for a user          |
+| `listPaymentsByOrgId`       | `orgId`                 | List payments for an org          |
+| `listInvoices`              | `stripeCustomerId`      | List invoices for a customer      |
+| `listInvoicesByUserId`      | `userId`                | List invoices for a user          |
+| `listInvoicesByOrgId`       | `orgId`                 | List invoices for an org          |
 
 ## Webhook Events
 
 The component automatically handles these Stripe webhook events:
 
-| Event | Action |
-|-------|--------|
-| `customer.created` | Creates customer record |
-| `customer.updated` | Updates customer record |
-| `customer.subscription.created` | Creates subscription record |
-| `customer.subscription.updated` | Updates subscription record |
-| `customer.subscription.deleted` | Marks subscription as canceled |
-| `payment_intent.succeeded` | Creates payment record |
-| `payment_intent.payment_failed` | Updates payment status |
-| `invoice.created` | Creates invoice record |
-| `invoice.paid` | Updates invoice to paid |
-| `invoice.payment_failed` | Marks invoice as failed |
-| `checkout.session.completed` | Handles completed checkout sessions |
+| Event                           | Action                              |
+| ------------------------------- | ----------------------------------- |
+| `customer.created`              | Creates customer record             |
+| `customer.updated`              | Updates customer record             |
+| `customer.subscription.created` | Creates subscription record         |
+| `customer.subscription.updated` | Updates subscription record         |
+| `customer.subscription.deleted` | Marks subscription as canceled      |
+| `payment_intent.succeeded`      | Creates payment record              |
+| `payment_intent.payment_failed` | Updates payment status              |
+| `invoice.created`               | Creates invoice record              |
+| `invoice.paid`                  | Updates invoice to paid             |
+| `invoice.payment_failed`        | Marks invoice as failed             |
+| `checkout.session.completed`    | Handles completed checkout sessions |
 
 ### Custom Webhook Handlers
 
@@ -307,61 +309,66 @@ export default http;
 The component creates these tables in its namespace:
 
 ### customers
-| Field | Type | Description |
-|-------|------|-------------|
-| `stripeCustomerId` | string | Stripe customer ID |
-| `email` | string? | Customer email |
-| `name` | string? | Customer name |
-| `metadata` | object? | Custom metadata |
+
+| Field              | Type    | Description        |
+| ------------------ | ------- | ------------------ |
+| `stripeCustomerId` | string  | Stripe customer ID |
+| `email`            | string? | Customer email     |
+| `name`             | string? | Customer name      |
+| `metadata`         | object? | Custom metadata    |
 
 ### subscriptions
-| Field | Type | Description |
-|-------|------|-------------|
-| `stripeSubscriptionId` | string | Stripe subscription ID |
-| `stripeCustomerId` | string | Customer ID |
-| `status` | string | Subscription status |
-| `priceId` | string | Price ID |
-| `quantity` | number? | Seat count |
-| `currentPeriodEnd` | number | Period end timestamp |
-| `cancelAtPeriodEnd` | boolean | Will cancel at period end |
-| `userId` | string? | Linked user ID |
-| `orgId` | string? | Linked org ID |
-| `metadata` | object? | Custom metadata |
+
+| Field                  | Type    | Description               |
+| ---------------------- | ------- | ------------------------- |
+| `stripeSubscriptionId` | string  | Stripe subscription ID    |
+| `stripeCustomerId`     | string  | Customer ID               |
+| `status`               | string  | Subscription status       |
+| `priceId`              | string  | Price ID                  |
+| `quantity`             | number? | Seat count                |
+| `currentPeriodEnd`     | number  | Period end timestamp      |
+| `cancelAtPeriodEnd`    | boolean | Will cancel at period end |
+| `userId`               | string? | Linked user ID            |
+| `orgId`                | string? | Linked org ID             |
+| `metadata`             | object? | Custom metadata           |
 
 ### checkout_sessions
-| Field | Type | Description |
-|-------|------|-------------|
-| `stripeCheckoutSessionId` | string | Checkout session ID |
-| `stripeCustomerId` | string? | Customer ID |
-| `status` | string | Session status |
-| `mode` | string | Session mode (payment/subscription/setup) |
-| `metadata` | object? | Custom metadata |
+
+| Field                     | Type    | Description                               |
+| ------------------------- | ------- | ----------------------------------------- |
+| `stripeCheckoutSessionId` | string  | Checkout session ID                       |
+| `stripeCustomerId`        | string? | Customer ID                               |
+| `status`                  | string  | Session status                            |
+| `mode`                    | string  | Session mode (payment/subscription/setup) |
+| `metadata`                | object? | Custom metadata                           |
 
 ### payments
-| Field | Type | Description |
-|-------|------|-------------|
-| `stripePaymentIntentId` | string | Payment intent ID |
-| `stripeCustomerId` | string? | Customer ID |
-| `amount` | number | Amount in cents |
-| `currency` | string | Currency code |
-| `status` | string | Payment status |
-| `created` | number | Created timestamp |
-| `userId` | string? | Linked user ID |
-| `orgId` | string? | Linked org ID |
-| `metadata` | object? | Custom metadata |
+
+| Field                   | Type    | Description       |
+| ----------------------- | ------- | ----------------- |
+| `stripePaymentIntentId` | string  | Payment intent ID |
+| `stripeCustomerId`      | string? | Customer ID       |
+| `amount`                | number  | Amount in cents   |
+| `currency`              | string  | Currency code     |
+| `status`                | string  | Payment status    |
+| `created`               | number  | Created timestamp |
+| `userId`                | string? | Linked user ID    |
+| `orgId`                 | string? | Linked org ID     |
+| `metadata`              | object? | Custom metadata   |
 
 ### invoices
-| Field | Type | Description |
-|-------|------|-------------|
-| `stripeInvoiceId` | string | Invoice ID |
-| `stripeCustomerId` | string | Customer ID |
-| `stripeSubscriptionId` | string? | Subscription ID |
-| `status` | string | Invoice status |
-| `amountDue` | number | Amount due |
-| `amountPaid` | number | Amount paid |
-| `created` | number | Created timestamp |
-| `userId` | string? | Linked user ID |
-| `orgId` | string? | Linked org ID |
+
+| Field                  | Type    | Description       |
+| ---------------------- | ------- | ----------------- |
+| `stripeInvoiceId`      | string  | Invoice ID        |
+| `stripeCustomerId`     | string  | Customer ID       |
+| `stripeSubscriptionId` | string? | Subscription ID   |
+| `status`               | string  | Invoice status    |
+| `amountDue`            | number  | Amount due        |
+| `amountPaid`           | number  | Amount paid       |
+| `created`              | number  | Created timestamp |
+| `userId`               | string? | Linked user ID    |
+| `orgId`                | string? | Linked org ID     |
 
 ## Example App
 
@@ -375,6 +382,7 @@ npm run dev
 ```
 
 The example includes:
+
 - Landing page with product showcase
 - One-time payments and subscriptions
 - User profile with order history
@@ -384,7 +392,8 @@ The example includes:
 
 ## Authentication
 
-This component works with any Convex authentication provider. The example uses [Clerk](https://clerk.com):
+This component works with any Convex authentication provider. The example uses
+[Clerk](https://clerk.com):
 
 1. Create a Clerk application at [clerk.com](https://clerk.com)
 2. Add `VITE_CLERK_PUBLISHABLE_KEY` to your `.env.local`
@@ -406,13 +415,17 @@ export default {
 ### Tables are empty after checkout
 
 Make sure you've:
-1. Set `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` in Convex environment variables
+
+1. Set `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` in Convex environment
+   variables
 2. Configured the webhook endpoint in Stripe with the correct events
-3. Added `invoice.created` and `invoice.finalized` events (not just `invoice.paid`)
+3. Added `invoice.created` and `invoice.finalized` events (not just
+   `invoice.paid`)
 
 ### "Not authenticated" errors
 
 Ensure your auth provider is configured:
+
 1. Create `convex/auth.config.ts` with your provider
 2. Run `npx convex dev` to push the config
 3. Verify the user is signed in before calling actions
@@ -420,8 +433,10 @@ Ensure your auth provider is configured:
 ### Webhooks returning 400/500
 
 Check the Convex logs in your dashboard for errors. Common issues:
+
 - Missing `STRIPE_WEBHOOK_SECRET`
-- Wrong webhook URL (should be `https://<deployment>.convex.site/stripe/webhook`)
+- Wrong webhook URL (should be
+  `https://<deployment>.convex.site/stripe/webhook`)
 - Missing events in webhook configuration
 
 ## License

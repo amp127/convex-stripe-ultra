@@ -1,17 +1,17 @@
 # Convex Functions - Stripe Integration
 
 This directory contains the Convex backend functions for Benji's Store,
-demonstrating the `@convex/stripe` component.
+demonstrating the `@convex-dev/stripe` component.
 
 ## Files
 
-| File               | Purpose                               |
-| ------------------ | ------------------------------------- |
-| `convex.config.ts` | Installs the @convex/stripe component |
-| `auth.config.ts`   | Configures Clerk authentication       |
-| `http.ts`          | Registers Stripe webhook routes       |
-| `schema.ts`        | Database schema (app-specific tables) |
-| `stripe.ts`        | Stripe actions and queries            |
+| File               | Purpose                                   |
+| ------------------ | ----------------------------------------- |
+| `convex.config.ts` | Installs the @convex-dev/stripe component |
+| `auth.config.ts`   | Configures Clerk authentication           |
+| `http.ts`          | Registers Stripe webhook routes           |
+| `schema.ts`        | Database schema (app-specific tables)     |
+| `stripe.ts`        | Stripe actions and queries                |
 
 ## Quick Reference
 
@@ -20,7 +20,7 @@ demonstrating the `@convex/stripe` component.
 ```typescript
 // convex/convex.config.ts
 import { defineApp } from "convex/server";
-import stripe from "@convex/stripe/convex.config.js";
+import stripe from "@convex-dev/stripe/convex.config.js";
 
 const app = defineApp();
 app.use(stripe);
@@ -33,7 +33,7 @@ export default app;
 ```typescript
 // convex/stripe.ts
 import { components } from "./_generated/api";
-import { StripeSubscriptions } from "@convex/stripe";
+import { StripeSubscriptions } from "@convex-dev/stripe";
 
 const stripeClient = new StripeSubscriptions(components.stripe, {});
 ```
@@ -138,7 +138,7 @@ const orgInvoices = await ctx.runQuery(
 // convex/http.ts
 import { httpRouter } from "convex/server";
 import { components } from "./_generated/api";
-import { registerRoutes } from "@convex/stripe";
+import { registerRoutes } from "@convex-dev/stripe";
 
 const http = httpRouter();
 
@@ -175,7 +175,7 @@ The `APP_URL` is used for Stripe checkout success/cancel redirects.
 
 ## Component Tables
 
-The `@convex/stripe` component manages these tables:
+The `@convex-dev/stripe` component manages these tables:
 
 - `stripe.customers` - Stripe customer records
 - `stripe.subscriptions` - Subscription records with user/org linking

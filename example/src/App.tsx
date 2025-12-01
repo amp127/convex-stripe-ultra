@@ -166,8 +166,8 @@ function Hero({ setCurrentPage }: { setCurrentPage: (page: Page) => void }) {
             <em>delivered monthly</em>
           </h1>
           <p className="hero-subtitle">
-            The perfect example app for testing the @convex/stripe component.
-            Buy a single hat or subscribe for monthly deliveries.
+            The perfect example app for testing the @convex-dev/stripe
+            component. Buy a single hat or subscribe for monthly deliveries.
           </p>
           <div className="hero-buttons">
             <button
@@ -281,7 +281,7 @@ function Features() {
         <span className="section-badge">How It Works</span>
         <h2 className="section-title">Payments made simple</h2>
         <p className="section-subtitle">
-          Built with the @convex/stripe component for seamless Stripe
+          Built with the @convex-dev/stripe component for seamless Stripe
           integration.
         </p>
       </div>

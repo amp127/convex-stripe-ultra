@@ -1,6 +1,6 @@
 # Benji's Store - Example App
 
-A complete example app demonstrating the `@convex/stripe` component with Clerk
+A complete example app demonstrating the `@convex-dev/stripe` component with Clerk
 authentication.
 
 ![Benji's Store Screenshot](https://via.placeholder.com/800x400?text=Benji%27s+Store)
@@ -250,4 +250,4 @@ npx convex dev --once
 - [Convex Documentation](https://docs.convex.dev)
 - [Stripe Documentation](https://stripe.com/docs)
 - [Clerk Documentation](https://clerk.com/docs)
-- [@convex/stripe Component](../README.md)
+- [@convex-dev/stripe Component](../README.md)
