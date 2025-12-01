@@ -23,25 +23,27 @@ export type ActionCtx = Pick<
 
 /**
  * Handler function for a specific Stripe webhook event.
- * Receives the mutation context and the full Stripe event object.
+ * Receives the action context and the full Stripe event object.
  */
 export type StripeEventHandler<
-  Ctx extends ActionCtx = ActionCtx,
   T extends Stripe.Event.Type = Stripe.Event.Type,
-> = (ctx: Ctx, event: Stripe.Event & { type: T }) => Promise<void>;
+> = (
+  ctx: GenericActionCtx<GenericDataModel>,
+  event: Stripe.Event & { type: T }
+) => Promise<void>;
 
 /**
  * Map of event types to their handlers.
  * Users can provide handlers for any Stripe webhook event type.
  */
-export type StripeEventHandlers<Ctx extends ActionCtx = ActionCtx> = {
-  [K in Stripe.Event.Type]?: StripeEventHandler<Ctx, K>;
+export type StripeEventHandlers = {
+  [K in Stripe.Event.Type]?: StripeEventHandler<K>;
 };
 
 /**
  * Configuration for webhook registration.
  */
-export type RegisterRoutesConfig<Ctx extends ActionCtx = ActionCtx> = {
+export type RegisterRoutesConfig = {
   /**
    * Optional webhook path. Defaults to "/stripe/webhook"
    */
@@ -58,7 +60,7 @@ export type RegisterRoutesConfig<Ctx extends ActionCtx = ActionCtx> = {
    * Optional generic event handler that runs for all events.
    * This runs after default processing and before specific event handlers.
    */
-  onEvent?: StripeEventHandler<Ctx>;
+  onEvent?: StripeEventHandler;
   /**
    * Stripe webhook secret for signature verification.
    * Defaults to process.env.STRIPE_WEBHOOK_SECRET
