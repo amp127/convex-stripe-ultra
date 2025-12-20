@@ -54,10 +54,11 @@ export class StripeSubscriptions {
       quantity: number;
     },
   ) {
-    // Delegate to the component's public action
+    // Delegate to the component's public action, passing the API key
     await ctx.runAction(this.component.public.updateSubscriptionQuantity, {
       stripeSubscriptionId: args.stripeSubscriptionId,
       quantity: args.quantity,
+      apiKey: this.apiKey,
     });
 
     return null;
