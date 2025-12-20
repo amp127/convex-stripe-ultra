@@ -387,7 +387,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
       updateSubscriptionQuantity: FunctionReference<
         "action",
         "internal",
-        { quantity: number; stripeSubscriptionId: string },
+        { apiKey: string; quantity: number; stripeSubscriptionId: string },
         null,
         Name
       >;

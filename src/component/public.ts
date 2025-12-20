@@ -302,23 +302,17 @@ export const updateSubscriptionMetadata = mutation({
 /**
  * Update subscription quantity (for seat-based pricing).
  * This will update both Stripe and the local database.
- * STRIPE_SECRET_KEY must be set as an environment variable.
+ * STRIPE_SECRET_KEY must be provided as a parameter.
  */
 export const updateSubscriptionQuantity = action({
   args: {
     stripeSubscriptionId: v.string(),
     quantity: v.number(),
+    apiKey: v.string(),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    const apiKey = process.env.STRIPE_SECRET_KEY;
-    if (!apiKey) {
-      throw new Error(
-        "STRIPE_SECRET_KEY must be provided as an environment variable",
-      );
-    }
-
-    const stripe = new StripeSDK(apiKey);
+    const stripe = new StripeSDK(args.apiKey);
 
     // Get the subscription from Stripe to find the subscription item ID
     const subscription = await stripe.subscriptions.retrieve(
