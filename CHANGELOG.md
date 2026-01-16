@@ -2,7 +2,8 @@
 
 ## 0.1.3
 
-- Fix subscription sync: `priceId` now updates on plan changes, and `cancelAtPeriodEnd` is correctly derived when Stripe sets `cancel_at`
+- Fix subscription sync: `priceId` now updates on plan changes, and
+  `cancelAtPeriodEnd` is correctly derived when Stripe sets `cancel_at`
 
 ## 0.1.2
 
