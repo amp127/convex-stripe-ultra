@@ -256,7 +256,7 @@ export class StripeSubscriptions {
 
   /**
    * Get or create a Stripe customer for a user.
-   * Checks existing subscriptions/payments first to avoid duplicates.
+   * Checks existing customers, subscriptions, and payments to avoid duplicates.
    */
   async getOrCreateCustomer(
     ctx: ActionCtx,
@@ -266,6 +266,21 @@ export class StripeSubscriptions {
       name?: string;
     },
   ) {
+    // Check the customers table directly by email (uses by_email index)
+    if (args.email) {
+      const existingCustomer = await ctx.runQuery(
+        this.component.public.getCustomerByEmail,
+        { email: args.email },
+      );
+
+      if (existingCustomer) {
+        return {
+          customerId: existingCustomer.stripeCustomerId,
+          isNew: false,
+        };
+      }
+    }
+
     // Check if customer exists by userId in subscriptions
     const existingSubs = await ctx.runQuery(
       this.component.public.listSubscriptionsByUserId,
@@ -291,7 +306,7 @@ export class StripeSubscriptions {
       email: args.email,
       name: args.name,
       metadata: { userId: args.userId },
-      idempotencyKey: args.userId, // Prevents duplicate customers if called concurrently
+      idempotencyKey: args.userId,
     });
 
     return { customerId: result.customerId, isNew: true };

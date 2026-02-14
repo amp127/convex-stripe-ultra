@@ -38,6 +38,24 @@ export const getCustomer = query({
 });
 
 /**
+ * Get a customer by their email address.
+ * Uses the by_email index for efficient lookup.
+ */
+export const getCustomerByEmail = query({
+  args: { email: v.string() },
+  returns: v.union(customerValidator, v.null()),
+  handler: async (ctx, args) => {
+    const customer = await ctx.db
+      .query("customers")
+      .withIndex("by_email", (q) => q.eq("email", args.email))
+      .first();
+    if (!customer) return null;
+    const { _id, _creationTime, ...data } = customer;
+    return data;
+  },
+});
+
+/**
  * Get a subscription by its Stripe subscription ID.
  */
 export const getSubscription = query({
