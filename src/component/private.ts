@@ -76,11 +76,14 @@ export const handleCustomerCreated = mutation({
       .unique();
 
     if (!existing) {
+      const metadata = args.metadata || {};
+      const userId = metadata.userId as string | undefined;
       await ctx.db.insert("customers", {
         stripeCustomerId: args.stripeCustomerId,
         email: args.email,
         name: args.name,
-        metadata: args.metadata || {},
+        metadata,
+        userId,
       });
     }
 

@@ -38,6 +38,42 @@ export const getCustomer = query({
 });
 
 /**
+ * Get a customer by their email address.
+ * Uses the by_email index for efficient lookup.
+ */
+export const getCustomerByEmail = query({
+  args: { email: v.string() },
+  returns: v.union(customerValidator, v.null()),
+  handler: async (ctx, args) => {
+    const customer = await ctx.db
+      .query("customers")
+      .withIndex("by_email", (q) => q.eq("email", args.email))
+      .first();
+    if (!customer) return null;
+    const { _id, _creationTime, ...data } = customer;
+    return data;
+  },
+});
+
+/**
+ * Get a customer by their user ID.
+ * Uses the by_user_id index for efficient lookup.
+ */
+export const getCustomerByUserId = query({
+  args: { userId: v.string() },
+  returns: v.union(customerValidator, v.null()),
+  handler: async (ctx, args) => {
+    const customer = await ctx.db
+      .query("customers")
+      .withIndex("by_user_id", (q) => q.eq("userId", args.userId))
+      .first();
+    if (!customer) return null;
+    const { _id, _creationTime, ...data } = customer;
+    return data;
+  },
+});
+
+/**
  * Get a subscription by its Stripe subscription ID.
  */
 export const getSubscription = query({
@@ -244,11 +280,15 @@ export const createOrUpdateCustomer = mutation({
       )
       .unique();
 
+    const metadata = args.metadata || {};
+    const userId = metadata.userId as string | undefined;
+
     if (existing) {
       await ctx.db.patch(existing._id, {
         email: args.email,
         name: args.name,
         metadata: args.metadata,
+        ...(userId !== undefined && { userId }),
       });
     } else {
       await ctx.db.insert("customers", {
@@ -256,6 +296,7 @@ export const createOrUpdateCustomer = mutation({
         email: args.email,
         name: args.name,
         metadata: args.metadata,
+        userId,
       });
     }
     return args.stripeCustomerId;
