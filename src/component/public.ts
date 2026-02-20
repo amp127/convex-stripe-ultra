@@ -11,6 +11,7 @@ import StripeSDK from "stripe";
 // Reusable validators that omit system fields (_id, _creationTime)
 const customerValidator = schema.tables.customers.validator;
 const subscriptionValidator = schema.tables.subscriptions.validator;
+const checkoutSessionValidator = schema.tables.checkout_sessions.validator;
 const paymentValidator = schema.tables.payments.validator;
 const invoiceValidator = schema.tables.invoices.validator;
 
@@ -124,6 +125,21 @@ export const getSubscriptionByOrgId = query({
     if (!subscription) return null;
     const { _id, _creationTime, ...data } = subscription;
     return data;
+  },
+});
+
+/**
+ * List all subscriptions for an organization ID.
+ */
+export const listSubscriptionsByOrgId = query({
+  args: { orgId: v.string() },
+  returns: v.array(subscriptionValidator),
+  handler: async (ctx, args) => {
+    const subscriptions = await ctx.db
+      .query("subscriptions")
+      .withIndex("by_org_id", (q) => q.eq("orgId", args.orgId))
+      .collect();
+    return subscriptions.map(({ _id, _creationTime, ...data }) => data);
   },
 });
 
@@ -256,6 +272,42 @@ export const listInvoicesByUserId = query({
   },
 });
 
+/**
+ * Get a checkout session by its Stripe checkout session ID.
+ */
+export const getCheckoutSession = query({
+  args: { stripeCheckoutSessionId: v.string() },
+  returns: v.union(checkoutSessionValidator, v.null()),
+  handler: async (ctx, args) => {
+    const session = await ctx.db
+      .query("checkout_sessions")
+      .withIndex("by_stripe_checkout_session_id", (q) =>
+        q.eq("stripeCheckoutSessionId", args.stripeCheckoutSessionId),
+      )
+      .unique();
+    if (!session) return null;
+    const { _id, _creationTime, ...data } = session;
+    return data;
+  },
+});
+
+/**
+ * List checkout sessions for a customer.
+ */
+export const listCheckoutSessions = query({
+  args: { stripeCustomerId: v.string() },
+  returns: v.array(checkoutSessionValidator),
+  handler: async (ctx, args) => {
+    const sessions = await ctx.db
+      .query("checkout_sessions")
+      .withIndex("by_stripe_customer_id", (q) =>
+        q.eq("stripeCustomerId", args.stripeCustomerId),
+      )
+      .collect();
+    return sessions.map(({ _id, _creationTime, ...data }) => data);
+  },
+});
+
 // ============================================================================
 // PUBLIC MUTATIONS
 // ============================================================================
@@ -285,9 +337,9 @@ export const createOrUpdateCustomer = mutation({
 
     if (existing) {
       await ctx.db.patch(existing._id, {
-        email: args.email,
-        name: args.name,
-        metadata: args.metadata,
+        ...(args.email !== undefined && { email: args.email }),
+        ...(args.name !== undefined && { name: args.name }),
+        ...(args.metadata !== undefined && { metadata: args.metadata }),
         ...(userId !== undefined && { userId }),
       });
     } else {
@@ -332,8 +384,8 @@ export const updateSubscriptionMetadata = mutation({
 
     await ctx.db.patch(subscription._id, {
       metadata: args.metadata,
-      orgId: args.orgId,
-      userId: args.userId,
+      ...(args.orgId !== undefined && { orgId: args.orgId }),
+      ...(args.userId !== undefined && { userId: args.userId }),
     });
 
     return null;

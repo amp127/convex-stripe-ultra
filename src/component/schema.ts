@@ -36,7 +36,9 @@ export default defineSchema({
     status: v.string(),
     mode: v.string(),
     metadata: v.optional(v.any()),
-  }).index("by_stripe_checkout_session_id", ["stripeCheckoutSessionId"]),
+  })
+    .index("by_stripe_checkout_session_id", ["stripeCheckoutSessionId"])
+    .index("by_stripe_customer_id", ["stripeCustomerId"]),
   payments: defineTable({
     stripePaymentIntentId: v.string(),
     stripeCustomerId: v.optional(v.string()),
