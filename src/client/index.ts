@@ -266,16 +266,27 @@ export class StripeSubscriptions {
       name?: string;
     },
   ) {
-    // Check the customers table directly by email (uses by_email index)
+    // Check the customers table directly by userId (uses by_user_id index)
+    const existingByUserId = await ctx.runQuery(
+      this.component.public.getCustomerByUserId,
+      { userId: args.userId },
+    );
+    if (existingByUserId) {
+      return {
+        customerId: existingByUserId.stripeCustomerId,
+        isNew: false,
+      };
+    }
+
+    // Fallback: check by email (uses by_email index)
     if (args.email) {
-      const existingCustomer = await ctx.runQuery(
+      const existingByEmail = await ctx.runQuery(
         this.component.public.getCustomerByEmail,
         { email: args.email },
       );
-
-      if (existingCustomer) {
+      if (existingByEmail) {
         return {
-          customerId: existingCustomer.stripeCustomerId,
+          customerId: existingByEmail.stripeCustomerId,
           isNew: false,
         };
       }
