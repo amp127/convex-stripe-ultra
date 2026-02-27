@@ -1,7 +1,7 @@
 # Benji's Store - Example App
 
-A complete example app demonstrating the `@convex-dev/stripe` component with Clerk
-authentication.
+A complete example app demonstrating Stripe integration with Convex using
+`@raideno/convex-stripe` directly (no component), with Clerk authentication.
 
 ![Benji's Store Screenshot](https://via.placeholder.com/800x400?text=Benji%27s+Store)
 
@@ -28,9 +28,10 @@ authentication.
 ### 1. Clone and Install
 
 ```bash
-git clone https://github.com/get-convex/convex-stripe
-cd convex-stripe
+git clone https://github.com/amp127/convex-stripe-ultra
+cd convex-stripe-ultra
 npm install
+cd example && npm install
 ```
 
 ### 2. Configure Clerk
@@ -83,7 +84,7 @@ npm run dev
 | Variable                | Value                                            |
 | ----------------------- | ------------------------------------------------ |
 | `STRIPE_SECRET_KEY`     | `sk_test_...` (from Stripe)                      |
-| `STRIPE_WEBHOOK_SECRET` | `whsec_...` (from Step 5)                        |
+| `STRIPE_ACCOUNT_WEBHOOK_SECRET` | `whsec_...` (from Step 5)                |
 | `APP_URL`               | `http://localhost:5173` (or your production URL) |
 
 3. Create `example/convex/auth.config.ts`:
@@ -144,7 +145,7 @@ npx convex dev --once
 
 6. Click on your endpoint and copy the **Signing secret** (`whsec_...`)
 
-7. Add it to Convex environment variables as `STRIPE_WEBHOOK_SECRET`
+7. Add it to Convex environment variables as `STRIPE_ACCOUNT_WEBHOOK_SECRET`
 
 ### 6. Run the App
 
@@ -177,9 +178,10 @@ example/
 │   └── index.css        # Styling
 └── convex/
     ├── auth.config.ts   # Clerk authentication config
-    ├── convex.config.ts # Component installation
-    ├── http.ts          # Webhook route registration
-    ├── schema.ts        # App schema (extends component)
+    ├── convex.config.ts # Convex app config
+    ├── http.ts          # Webhook route registration (stripe.addHttpRoutes)
+    ├── schema.ts        # App schema with stripeTables
+    ├── stripeInit.ts    # internalConvexStripe init (@raideno/convex-stripe)
     └── stripe.ts        # Stripe actions and queries
 ```
 
@@ -187,7 +189,7 @@ example/
 
 ### `convex/stripe.ts`
 
-Contains all the Stripe integration logic:
+Uses `stripe` from `stripeInit` (internalConvexStripe) for all Stripe operations:
 
 - `createSubscriptionCheckout` - Create subscription checkout
 - `createPaymentCheckout` - Create one-time payment checkout
@@ -203,7 +205,7 @@ Contains all the Stripe integration logic:
 
 ### `convex/http.ts`
 
-Registers the Stripe webhook handler with optional custom event handlers.
+Registers Stripe webhook and redirect routes via `stripe.addHttpRoutes(http)` from `stripeInit`.
 
 ### `src/App.tsx`
 
@@ -226,7 +228,7 @@ React app with four pages:
 
 1. Check the webhook URL matches your Convex deployment
 2. Verify all required events are selected
-3. Check `STRIPE_WEBHOOK_SECRET` is set correctly
+3. Check `STRIPE_ACCOUNT_WEBHOOK_SECRET` is set correctly
 4. Look at Stripe webhook logs for delivery status
 
 ### Tables empty after purchase
@@ -250,4 +252,4 @@ npx convex dev --once
 - [Convex Documentation](https://docs.convex.dev)
 - [Stripe Documentation](https://stripe.com/docs)
 - [Clerk Documentation](https://clerk.com/docs)
-- [@convex-dev/stripe Component](../README.md)
+- [@convex-dev/stripe Component (built on @raideno/convex-stripe)](../README.md)

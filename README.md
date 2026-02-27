@@ -1,38 +1,211 @@
 # @convex-dev/stripe
 
-[![Integrate Stripe with Convex in 10 mins (Stripe Component)](https://thumbs.video-to-markdown.com/71e9f645.jpg)](https://youtu.be/-S4iHTAxnRw)
-
-A Convex component for integrating Stripe payments, subscriptions, and billing
-into your Convex application.
-
-[![npm version](https://badge.fury.io/js/@convex-dev%2Fstripe.svg)](https://badge.fury.io/js/@convex-dev%2Fstripe)
+A Convex component for integrating Stripe payments, subscriptions, and billing into your Convex app. Built on [@raideno/convex-stripe](https://github.com/raideno/convex-stripe), following [Theo's Stripe Recommendations](https://github.com/t3dotgg/stripe-recommendations).
 
 ## Features
 
-- 🛒 **Checkout Sessions** - Create one-time payment and subscription checkouts
-- 📦 **Subscription Management** - Create, update, cancel subscriptions
-- 👥 **Customer Management** - Automatic customer creation and linking
-- 💳 **Customer Portal** - Let users manage their billing
-- 🪑 **Seat-Based Pricing** - Update subscription quantities for team billing
-- 🔗 **User/Org Linking** - Link payments and subscriptions to users or
-  organizations
-- 🔔 **Webhook Handling** - Automatic sync of Stripe data to your Convex
-  database
-- 📊 **Real-time Data** - Query payments, subscriptions, invoices in real-time
+- **Subscriptions** - Create subscription checkouts via `stripe.subscribe`
+- **One-time payments** - Create payment checkouts via `stripe.pay`
+- **Customer portal** - Let users manage billing via `stripe.portal`
+- **Stripe Connect** - Create connected accounts and onboarding links
+- **Webhook sync** - Automatic sync of Stripe data to Convex tables (24 tables)
+- **Entity-based** - Use `entityId` (userId, orgId, etc.) for customers
+- **Seat-based pricing** - Update subscription quantities
+- **Pre-built queries** - List subscriptions, payments, invoices by user/org
 
-## Quick Start
+## Two Ways to Use
 
-### 1. Install the Component
+### Option A: Direct package usage (recommended for most apps)
+
+Use `@raideno/convex-stripe` (or `@convex-dev/stripe/server`) directly—no component. Full control, minimal abstraction.
+
+### Option B: Component + StripeSubscriptions client
+
+Use the Convex component for a higher-level `StripeSubscriptions` client and pre-built queries. Best when you want a drop-in API.
+
+---
+
+## Quick Start (Direct Usage)
+
+### 1. Install
 
 ```bash
-npm install @convex-dev/stripe
+npm install @convex-dev/stripe stripe
+# or: npm install @raideno/convex-stripe stripe
 ```
 
-### 2. Add to Your Convex App
+### 2. Schema
 
-Create or update `convex/convex.config.ts`:
+Add `stripeTables` to your Convex schema:
 
-```typescript
+```ts
+// convex/schema.ts
+import { defineSchema } from "convex/server";
+import { stripeTables } from "@raideno/convex-stripe/server";
+
+export default defineSchema({
+  ...stripeTables,
+  // your other tables...
+});
+```
+
+### 3. Stripe init
+
+Create `convex/stripeInit.ts`:
+
+```ts
+import { internalConvexStripe, syncAllTables } from "@raideno/convex-stripe/server";
+
+export const { stripe, store, sync } = internalConvexStripe({
+  stripe: {
+    secret_key: process.env.STRIPE_SECRET_KEY!,
+    account_webhook_secret: process.env.STRIPE_ACCOUNT_WEBHOOK_SECRET!,
+    // Optional, for Stripe Connect:
+    ...(process.env.STRIPE_CONNECT_WEBHOOK_SECRET && {
+      connect_webhook_secret: process.env.STRIPE_CONNECT_WEBHOOK_SECRET,
+    }),
+  },
+  sync: {
+    tables: syncAllTables(),
+  },
+});
+```
+
+### 4. HTTP routes
+
+```ts
+// convex/http.ts
+import { httpRouter } from "convex/server";
+import { stripe } from "./stripeInit";
+
+const http = httpRouter();
+stripe.addHttpRoutes(http);
+
+export default http;
+```
+
+### 5. Environment variables
+
+In Convex Dashboard → Settings → Environment Variables:
+
+| Variable                         | Description                                      |
+| -------------------------------- | ------------------------------------------------ |
+| `STRIPE_SECRET_KEY`              | Stripe secret key (`sk_test_...` or `sk_live_...`) |
+| `STRIPE_ACCOUNT_WEBHOOK_SECRET`  | Webhook signing secret (`whsec_...`)              |
+| `STRIPE_CONNECT_WEBHOOK_SECRET`  | (Optional) Connect webhook secret                |
+
+### 6. Stripe setup
+
+1. [Stripe webhooks](https://dashboard.stripe.com/test/webhooks): add endpoint  
+   `https://<your-deployment>.convex.site/stripe/webhook`
+2. Enable required events (see [Synced Events](#synced-events) below).
+3. Enable [Stripe Billing Portal](https://dashboard.stripe.com/test/settings/billing/portal).
+
+### 7. Run sync (one-time)
+
+In Convex Dashboard → Functions, run the `sync` action with `{ tables: true }` to backfill existing Stripe data.
+
+### 8. Use in your app
+
+```ts
+// convex/stripe.ts
+import { action } from "./_generated/server";
+import { stripe } from "./stripeInit";
+import { v } from "convex/values";
+
+// Create a Stripe customer when a user is created (e.g. in auth callback)
+export const createCustomer = action({
+  args: { entityId: v.string(), email: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const customer = await stripe.customers.create(ctx, {
+      entityId: args.entityId,
+      email: args.email,
+    });
+    return customer.customerId;
+  },
+});
+
+// Subscription checkout
+export const createSubscriptionCheckout = action({
+  args: { entityId: v.string(), priceId: v.string() },
+  handler: async (ctx, args) => {
+    const session = await stripe.subscribe(ctx, {
+      entityId: args.entityId,
+      priceId: args.priceId,
+      mode: "subscription",
+      success_url: "https://example.com/success",
+      cancel_url: "https://example.com/cancel",
+    });
+    return session.url;
+  },
+});
+
+// One-time payment
+export const createPaymentCheckout = action({
+  args: { entityId: v.string(), orderId: v.string(), priceId: v.string() },
+  handler: async (ctx, args) => {
+    const session = await stripe.pay(ctx, {
+      entityId: args.entityId,
+      referenceId: args.orderId,
+      mode: "payment",
+      line_items: [{ price: args.priceId, quantity: 1 }],
+      success_url: "https://example.com/success",
+      cancel_url: "https://example.com/cancel",
+    });
+    return session.url;
+  },
+});
+
+// Customer portal
+export const openPortal = action({
+  args: { entityId: v.string() },
+  handler: async (ctx, args) => {
+    const session = await stripe.portal(ctx, {
+      entityId: args.entityId,
+      return_url: "https://example.com/account",
+    });
+    return session.url;
+  },
+});
+```
+
+Query the synced tables directly:
+
+```ts
+import { query } from "./_generated/server";
+
+export const getUserSubscriptions = query({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return [];
+
+    const customer = await ctx.db
+      .query("stripeCustomers")
+      .withIndex("byEntityId", (q) => q.eq("entityId", identity.subject))
+      .first();
+    if (!customer) return [];
+
+    return await ctx.db
+      .query("stripeSubscriptions")
+      .withIndex("byCustomerId", (q) => q.eq("customerId", customer.customerId))
+      .collect();
+  },
+});
+```
+
+---
+
+## Quick Start (Component Mode)
+
+### 1. Install and add component
+
+```bash
+npm install @convex-dev/stripe stripe
+```
+
+```ts
+// convex/convex.config.ts
 import { defineApp } from "convex/server";
 import stripe from "@convex-dev/stripe/convex.config.js";
 
@@ -42,179 +215,83 @@ app.use(stripe);
 export default app;
 ```
 
-### 3. Set Up Environment Variables
+### 2. Schema and HTTP
 
-Add these to your [Convex Dashboard](https://dashboard.convex.dev) → Settings → Environment Variables:
+The component brings `stripeTables` into your app. You still need to register webhook routes. Use the package's server init in your app:
 
-| Variable                | Description                                             |
-| ----------------------- | ------------------------------------------------------- |
-| `STRIPE_SECRET_KEY`     | Your Stripe secret key (`sk_test_...` or `sk_live_...`) |
-| `STRIPE_WEBHOOK_SECRET` | Webhook signing secret (`whsec_...`) - see Step 4       |
+```ts
+// convex/stripeInit.ts – same as direct usage above
+import { internalConvexStripe, syncAllTables } from "@convex-dev/stripe/server";
 
-### 4. Configure Stripe Webhooks
+export const { stripe, store, sync } = internalConvexStripe({
+  stripe: {
+    secret_key: process.env.STRIPE_SECRET_KEY!,
+    account_webhook_secret: process.env.STRIPE_ACCOUNT_WEBHOOK_SECRET!,
+  },
+  sync: { tables: syncAllTables() },
+});
+```
 
-1. Go to [Stripe Dashboard → Developers → Webhooks](https://dashboard.stripe.com/test/webhooks)
-2. Click **"Add endpoint"**
-3. Enter your webhook URL:
-   ```
-   https://<your-convex-deployment>.convex.site/stripe/webhook
-   ```
-   (Find your deployment name in the Convex dashboard - it's the part before `.convex.cloud` in your URL)
-4. Select these events:
-   - `checkout.session.completed`
-   - `customer.created`
-   - `customer.updated`
-   - `customer.subscription.created`
-   - `customer.subscription.updated`
-   - `customer.subscription.deleted`
-   - `invoice.created`
-   - `invoice.finalized`
-   - `invoice.paid`
-   - `invoice.payment_failed`
-   - `payment_intent.succeeded`
-   - `payment_intent.payment_failed`
-5. Click **"Add endpoint"**
-6. Copy the **Signing secret** and add it as `STRIPE_WEBHOOK_SECRET` in Convex
+```ts
+// convex/schema.ts – add stripeTables if not using component's merged schema
+// The component merges its schema; add your own tables here.
+import { defineSchema } from "convex/server";
 
-### 5. Register Webhook Routes
+export default defineSchema({
+  // your tables...
+});
+```
 
-Create `convex/http.ts`:
-
-```typescript
+```ts
+// convex/http.ts
 import { httpRouter } from "convex/server";
-import { components } from "./_generated/api";
-import { registerRoutes } from "@convex-dev/stripe";
+import { stripe } from "./stripeInit";
 
 const http = httpRouter();
-
-// Register Stripe webhook handler at /stripe/webhook
-registerRoutes(http, components.stripe, {
-  webhookPath: "/stripe/webhook",
-});
-
+stripe.addHttpRoutes(http);
 export default http;
 ```
 
-### 6. Use the Component
+### 3. Use StripeSubscriptions client
 
-Create `convex/stripe.ts`:
-
-```typescript
+```ts
+// convex/stripe.ts
 import { action } from "./_generated/server";
 import { components } from "./_generated/api";
 import { StripeSubscriptions } from "@convex-dev/stripe";
 import { v } from "convex/values";
 
-const stripeClient = new StripeSubscriptions(components.stripe, {});
+const stripeClient = new StripeSubscriptions(components.stripe);
 
-// Create a checkout session for a subscription
 export const createSubscriptionCheckout = action({
   args: { priceId: v.string() },
-  returns: v.object({
-    sessionId: v.string(),
-    url: v.union(v.string(), v.null()),
-  }),
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Not authenticated");
 
-    // Get or create a Stripe customer
     const customer = await stripeClient.getOrCreateCustomer(ctx, {
       userId: identity.subject,
       email: identity.email,
       name: identity.name,
     });
 
-    // Create checkout session
     return await stripeClient.createCheckoutSession(ctx, {
+      entityId: identity.subject,
       priceId: args.priceId,
-      customerId: customer.customerId,
       mode: "subscription",
-      successUrl: "http://localhost:5173/?success=true",
-      cancelUrl: "http://localhost:5173/?canceled=true",
-      subscriptionMetadata: { userId: identity.subject },
-    });
-  },
-});
-
-// Create a checkout session for a one-time payment
-export const createPaymentCheckout = action({
-  args: { priceId: v.string() },
-  returns: v.object({
-    sessionId: v.string(),
-    url: v.union(v.string(), v.null()),
-  }),
-  handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Not authenticated");
-
-    const customer = await stripeClient.getOrCreateCustomer(ctx, {
-      userId: identity.subject,
-      email: identity.email,
-      name: identity.name,
-    });
-
-    return await stripeClient.createCheckoutSession(ctx, {
-      priceId: args.priceId,
-      customerId: customer.customerId,
-      mode: "payment",
-      successUrl: "http://localhost:5173/?success=true",
-      cancelUrl: "http://localhost:5173/?canceled=true",
-      paymentIntentMetadata: { userId: identity.subject },
+      successUrl: "https://example.com/success",
+      cancelUrl: "https://example.com/cancel",
     });
   },
 });
 ```
 
-## API Reference
+### 4. Component public queries
 
-### StripeSubscriptions Client
-
-```typescript
-import { StripeSubscriptions } from "@convex-dev/stripe";
-
-const stripeClient = new StripeSubscriptions(components.stripe, {
-  STRIPE_SECRET_KEY: "sk_...", // Optional, defaults to process.env.STRIPE_SECRET_KEY
-});
-```
-
-#### Methods
-
-| Method | Description |
-|--------|-------------|
-| `createCheckoutSession()` | Create a Stripe Checkout session |
-| `createCustomerPortalSession()` | Generate a Customer Portal URL |
-| `createCustomer()` | Create a new Stripe customer |
-| `getOrCreateCustomer()` | Get existing or create new customer |
-| `cancelSubscription()` | Cancel a subscription |
-| `reactivateSubscription()` | Reactivate a subscription set to cancel |
-| `updateSubscriptionQuantity()` | Update seat count |
-
-### createCheckoutSession
-
-```typescript
-await stripeClient.createCheckoutSession(ctx, {
-  priceId: "price_...",
-  customerId: "cus_...",           // Optional
-  mode: "subscription",             // "subscription" | "payment" | "setup"
-  successUrl: "https://...",
-  cancelUrl: "https://...",
-  quantity: 1,                      // Optional, default 1
-  metadata: {},                     // Optional, session metadata
-  subscriptionMetadata: {},         // Optional, attached to subscription
-  paymentIntentMetadata: {},        // Optional, attached to payment intent
-});
-```
-
-### Component Queries
-
-Access data directly via the component's public queries:
-
-```typescript
+```ts
 import { query } from "./_generated/server";
 import { components } from "./_generated/api";
 
-// List subscriptions for a user
 export const getUserSubscriptions = query({
   args: {},
   handler: async (ctx) => {
@@ -227,219 +304,108 @@ export const getUserSubscriptions = query({
     );
   },
 });
-
-// List payments for a user
-export const getUserPayments = query({
-  args: {},
-  handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) return [];
-
-    return await ctx.runQuery(components.stripe.public.listPaymentsByUserId, {
-      userId: identity.subject,
-    });
-  },
-});
 ```
 
-### Available Public Queries
+---
 
-| Query                       | Arguments               | Description                       |
-| --------------------------- | ----------------------- | --------------------------------- |
-| `getCustomer`               | `stripeCustomerId`      | Get a customer by Stripe ID       |
-| `listSubscriptions`         | `stripeCustomerId`      | List subscriptions for a customer |
-| `listSubscriptionsByUserId` | `userId`                | List subscriptions for a user     |
-| `getSubscription`           | `stripeSubscriptionId`  | Get a subscription by ID          |
-| `getSubscriptionByOrgId`    | `orgId`                 | Get subscription for an org       |
-| `getPayment`                | `stripePaymentIntentId` | Get a payment by ID               |
-| `listPayments`              | `stripeCustomerId`      | List payments for a customer      |
-| `listPaymentsByUserId`      | `userId`                | List payments for a user          |
-| `listPaymentsByOrgId`       | `orgId`                 | List payments for an org          |
-| `listInvoices`              | `stripeCustomerId`      | List invoices for a customer      |
-| `listInvoicesByUserId`      | `userId`                | List invoices for a user          |
-| `listInvoicesByOrgId`       | `orgId`                 | List invoices for an org          |
+## API Reference
 
-## Webhook Events
+### StripeSubscriptions (component mode)
 
-The component automatically handles these Stripe webhook events:
+| Method                       | Description                                            |
+| ---------------------------- | ------------------------------------------------------ |
+| `createCheckoutSession()`    | Create a Stripe Checkout session (subscription/payment) |
+| `createCustomerPortalSession()` | Open the Stripe Customer Portal                      |
+| `createCustomer()`           | Create a Stripe customer                               |
+| `getOrCreateCustomer()`      | Get or create a Stripe customer                        |
+| `cancelSubscription()`       | Cancel a subscription                                  |
+| `reactivateSubscription()`   | Reactivate a subscription set to cancel                 |
+| `updateSubscriptionQuantity()` | Update seat count for a subscription                 |
+| `createConnectAccount()`     | Create a Stripe Connect account                        |
+| `createConnectAccountLink()` | Create an onboarding link for a Connect account        |
 
-| Event                           | Action                              |
-| ------------------------------- | ----------------------------------- |
-| `customer.created`              | Creates customer record             |
-| `customer.updated`              | Updates customer record             |
-| `customer.subscription.created` | Creates subscription record         |
-| `customer.subscription.updated` | Updates subscription record         |
-| `customer.subscription.deleted` | Marks subscription as canceled      |
-| `payment_intent.succeeded`      | Creates payment record              |
-| `payment_intent.payment_failed` | Updates payment status              |
-| `invoice.created`               | Creates invoice record              |
-| `invoice.paid`                  | Updates invoice to paid             |
-| `invoice.payment_failed`        | Marks invoice as failed             |
-| `checkout.session.completed`    | Handles completed checkout sessions |
+### Component public queries
 
-### Custom Webhook Handlers
+| Query                       | Args                  | Description                     |
+| --------------------------- | --------------------- | ------------------------------- |
+| `getCustomer`               | `stripeCustomerId`    | Customer by Stripe ID           |
+| `getCustomerByEmail`        | `email`               | Customer by email               |
+| `getCustomerByUserId`       | `userId`              | Customer by entityId            |
+| `listSubscriptions`        | `stripeCustomerId`    | Subscriptions for a customer    |
+| `listSubscriptionsByUserId` | `userId`              | Subscriptions for a user        |
+| `listSubscriptionsByOrgId` | `orgId`               | Subscriptions for an org        |
+| `getSubscription`          | `stripeSubscriptionId`| Subscription by ID              |
+| `getSubscriptionByOrgId`   | `orgId`               | Subscription for an org         |
+| `getPayment`               | `stripePaymentIntentId`| Payment by ID                   |
+| `listPayments`              | `stripeCustomerId`    | Payments for a customer         |
+| `listPaymentsByUserId`     | `userId`              | Payments for a user             |
+| `listPaymentsByOrgId`      | `orgId`               | Payments for an org             |
+| `listInvoices`             | `stripeCustomerId`    | Invoices for a customer        |
+| `listInvoicesByUserId`     | `userId`              | Invoices for a user            |
+| `listInvoicesByOrgId`      | `orgId`               | Invoices for an org            |
+| `getCheckoutSession`       | `stripeCheckoutSessionId` | Checkout session by ID      |
+| `listCheckoutSessions`     | `stripeCustomerId`    | Checkout sessions for a customer |
 
-Add custom logic to webhook events:
+### Package API (direct usage)
 
-```typescript
-import { httpRouter } from "convex/server";
-import { components } from "./_generated/api";
-import { registerRoutes } from "@convex-dev/stripe";
-import type Stripe from "stripe";
+- `stripe.customers.create` – Create/get customer by entityId  
+- `stripe.subscribe` – Create subscription checkout  
+- `stripe.pay` – Create one-time payment checkout  
+- `stripe.portal` – Open billing portal  
+- `stripe.accounts.create` – Create Connect account  
+- `stripe.accounts.link` – Create Connect onboarding link  
+- `stripe.client` – Raw Stripe SDK client  
+- `stripe.addHttpRoutes` – Register webhook and redirect routes  
 
-const http = httpRouter();
+See [@raideno/convex-stripe](https://github.com/raideno/convex-stripe) for full API details.
 
-registerRoutes(http, components.stripe, {
-  events: {
-    "customer.subscription.updated": async (ctx, event: Stripe.CustomerSubscriptionUpdatedEvent) => {
-      const subscription = event.data.object;
-      console.log("Subscription updated:", subscription.id, subscription.status);
-      // Add custom logic here
-    },
-  },
-  onEvent: async (ctx, event: Stripe.Event) => {
-    // Called for ALL events - useful for logging/analytics
-    console.log("Stripe event:", event.type);
-  },
-});
+---
 
-export default http;
-```
+## Synced tables (24)
 
-## Database Schema
+The library syncs Stripe data into Convex tables such as:
 
-The component creates these tables in its namespace:
+`stripeCustomers`, `stripeSubscriptions`, `stripeProducts`, `stripePrices`, `stripeInvoices`, `stripePaymentIntents`, `stripeCheckoutSessions`, `stripeCoupons`, `stripePromotionCodes`, `stripeRefunds`, `stripeCharges`, `stripePaymentMethods`, `stripeAccounts` (Connect), and others.
 
-### customers
+## Synced events
 
-| Field              | Type    | Description        |
-| ------------------ | ------- | ------------------ |
-| `stripeCustomerId` | string  | Stripe customer ID |
-| `email`            | string? | Customer email     |
-| `name`             | string? | Customer name      |
-| `metadata`         | object? | Custom metadata    |
+Webhooks handle events for subscriptions, customers, invoices, payment intents, checkout sessions, products, prices, charges, refunds, and more. See the [package docs](https://github.com/raideno/convex-stripe) for the full list.
 
-### subscriptions
+---
 
-| Field                  | Type    | Description               |
-| ---------------------- | ------- | ------------------------- |
-| `stripeSubscriptionId` | string  | Stripe subscription ID    |
-| `stripeCustomerId`     | string  | Customer ID               |
-| `status`               | string  | Subscription status       |
-| `priceId`              | string  | Price ID                  |
-| `quantity`             | number? | Seat count                |
-| `currentPeriodEnd`     | number  | Period end timestamp      |
-| `cancelAtPeriodEnd`    | boolean | Will cancel at period end |
-| `userId`               | string? | Linked user ID            |
-| `orgId`                | string? | Linked org ID             |
-| `metadata`             | object? | Custom metadata           |
+## Example app
 
-### checkout_sessions
-
-| Field                     | Type    | Description                               |
-| ------------------------- | ------- | ----------------------------------------- |
-| `stripeCheckoutSessionId` | string  | Checkout session ID                       |
-| `stripeCustomerId`        | string? | Customer ID                               |
-| `status`                  | string  | Session status                            |
-| `mode`                    | string  | Session mode (payment/subscription/setup) |
-| `metadata`                | object? | Custom metadata                           |
-
-### payments
-
-| Field                   | Type    | Description       |
-| ----------------------- | ------- | ----------------- |
-| `stripePaymentIntentId` | string  | Payment intent ID |
-| `stripeCustomerId`      | string? | Customer ID       |
-| `amount`                | number  | Amount in cents   |
-| `currency`              | string  | Currency code     |
-| `status`                | string  | Payment status    |
-| `created`               | number  | Created timestamp |
-| `userId`                | string? | Linked user ID    |
-| `orgId`                 | string? | Linked org ID     |
-| `metadata`              | object? | Custom metadata   |
-
-### invoices
-
-| Field                  | Type    | Description       |
-| ---------------------- | ------- | ----------------- |
-| `stripeInvoiceId`      | string  | Invoice ID        |
-| `stripeCustomerId`     | string  | Customer ID       |
-| `stripeSubscriptionId` | string? | Subscription ID   |
-| `status`               | string  | Invoice status    |
-| `amountDue`            | number  | Amount due        |
-| `amountPaid`           | number  | Amount paid       |
-| `created`              | number  | Created timestamp |
-| `userId`               | string? | Linked user ID    |
-| `orgId`                | string? | Linked org ID     |
-
-## Example App
-
-Check out the full example app in the [`example/`](./example) directory:
+The [`example/`](./example) directory contains a full demo that uses the direct package approach (no component):
 
 ```bash
-git clone https://github.com/get-convex/convex-stripe
-cd convex-stripe
+git clone https://github.com/amp127/convex-stripe-ultra
+cd convex-stripe-ultra
 npm install
+cd example && npm install
 npm run dev
 ```
 
-The example includes:
+The example includes one-time payments, subscriptions, user profile with order history, subscription management, customer portal, and team/org billing.
 
-- Landing page with product showcase
-- One-time payments and subscriptions
-- User profile with order history
-- Subscription management (cancel, update seats)
-- Customer portal integration
-- Team/organization billing
+---
 
-## Authentication
+## Exports
 
-This component works with any Convex authentication provider. The example uses
-[Clerk](https://clerk.com):
+| Export             | Use case                                  |
+| ------------------ | ----------------------------------------- |
+| `@convex-dev/stripe` | `StripeSubscriptions` client (component mode) |
+| `@convex-dev/stripe/server` | `internalConvexStripe`, `stripeTables`, `syncAllTables`, etc. |
+| `@convex-dev/stripe/convex.config.js` | Convex component (component mode)       |
 
-1. Create a Clerk application at [clerk.com](https://clerk.com)
-2. Add `VITE_CLERK_PUBLISHABLE_KEY` to your `.env.local`
-3. Create `convex/auth.config.ts`:
-
-```typescript
-export default {
-  providers: [
-    {
-      domain: "https://your-clerk-domain.clerk.accounts.dev",
-      applicationID: "convex",
-    },
-  ],
-};
-```
+---
 
 ## Troubleshooting
 
-### Tables are empty after checkout
+- **Tables empty after checkout** – Confirm `STRIPE_SECRET_KEY` and `STRIPE_ACCOUNT_WEBHOOK_SECRET` are set, webhook URL is correct, and required events are enabled. Run `sync` with `{ tables: true }`.
+- **Webhooks failing** – Verify webhook URL (`https://<deployment>.convex.site/stripe/webhook`) and the signing secret in Stripe.
+- **"Not authenticated"** – Ensure your auth provider and `auth.config.ts` are configured.
 
-Make sure you've:
-
-1. Set `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` in Convex environment
-   variables
-2. Configured the webhook endpoint in Stripe with the correct events
-3. Added `invoice.created` and `invoice.finalized` events (not just
-   `invoice.paid`)
-
-### "Not authenticated" errors
-
-Ensure your auth provider is configured:
-
-1. Create `convex/auth.config.ts` with your provider
-2. Run `npx convex dev` to push the config
-3. Verify the user is signed in before calling actions
-
-### Webhooks returning 400/500
-
-Check the Convex logs in your dashboard for errors. Common issues:
-
-- Missing `STRIPE_WEBHOOK_SECRET`
-- Wrong webhook URL (should be
-  `https://<deployment>.convex.site/stripe/webhook`)
-- Missing events in webhook configuration
+---
 
 ## License
 
