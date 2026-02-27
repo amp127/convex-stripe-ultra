@@ -1,6 +1,8 @@
-import StripeSDK from "stripe";
-import type { ActionCtx } from "./types.js";
+import type { ActionCtx, RegisterRoutesConfig, StripeEventHandlers } from "./types.js";
 import type { ComponentApi } from "../component/_generated/component.js";
+import type { HttpRouter } from "convex/server";
+import { syncAllTables } from "@raideno/convex-stripe/server";
+import { internalConvexStripe } from "@raideno/convex-stripe/server";
 
 export type StripeComponent = ComponentApi;
 
@@ -12,6 +14,9 @@ export type StripeComponent = ComponentApi;
  * HTTP routes are registered with stripe.addHttpRoutes(http) from the
  * component's stripe module.
  */
+
+export type { RegisterRoutesConfig, StripeEventHandlers };
+
 export class StripeSubscriptions {
   private _apiKey: string;
   constructor(
@@ -20,7 +25,9 @@ export class StripeSubscriptions {
       STRIPE_SECRET_KEY?: string;
     },
   ) {
-    this._apiKey = options?.STRIPE_SECRET_KEY ?? process.env.STRIPE_SECRET_KEY!;
+    this._apiKey =
+      options?.STRIPE_SECRET_KEY ??
+      (process.env.STRIPE_SECRET_KEY ?? "");
   }
   get apiKey() {
     if (!this._apiKey) {
@@ -49,7 +56,7 @@ export class StripeSubscriptions {
 
   /**
    * Cancel a subscription either immediately or at period end.
-   * Updates Stripe; the package syncs the local database via webhooks.
+   * Delegates to the component action; Stripe and DB stay in sync via webhooks.
    */
   async cancelSubscription(
     ctx: ActionCtx,
@@ -58,29 +65,23 @@ export class StripeSubscriptions {
       cancelAtPeriodEnd?: boolean;
     },
   ) {
-    const stripe = new StripeSDK(this.apiKey);
-    const cancelAtPeriodEnd = args.cancelAtPeriodEnd ?? true;
-
-    if (cancelAtPeriodEnd) {
-      await stripe.subscriptions.update(args.stripeSubscriptionId, {
-        cancel_at_period_end: true,
-      });
-    } else {
-      await stripe.subscriptions.cancel(args.stripeSubscriptionId);
-    }
+    await ctx.runAction(this.component.public.cancelSubscription, {
+      stripeSubscriptionId: args.stripeSubscriptionId,
+      cancelAtPeriodEnd: args.cancelAtPeriodEnd,
+    });
     return null;
   }
 
   /**
    * Reactivate a subscription that was set to cancel at period end.
+   * Delegates to the component action.
    */
   async reactivateSubscription(
     ctx: ActionCtx,
     args: { stripeSubscriptionId: string },
   ) {
-    const stripe = new StripeSDK(this.apiKey);
-    await stripe.subscriptions.update(args.stripeSubscriptionId, {
-      cancel_at_period_end: false,
+    await ctx.runAction(this.component.public.reactivateSubscription, {
+      stripeSubscriptionId: args.stripeSubscriptionId,
     });
     return null;
   }
@@ -296,3 +297,27 @@ export class StripeSubscriptions {
 }
 
 export default StripeSubscriptions;
+
+
+export function registerRoutes(
+  http: HttpRouter,
+  config?: RegisterRoutesConfig,
+) {
+
+  const { stripe } = internalConvexStripe({
+    stripe: {
+      secret_key: config?.STRIPE_SECRET_KEY ?? '',
+      account_webhook_secret: config?.STRIPE_ACCOUNT_WEBHOOK_SECRET ?? '',
+      ...(process.env.STRIPE_CONNECT_WEBHOOK_SECRET && {
+        connect_webhook_secret: process.env.STRIPE_CONNECT_WEBHOOK_SECRET,
+      }),
+    },
+    sync: {
+      tables: syncAllTables(),
+    },
+  });
+
+
+  stripe.addHttpRoutes(http);
+  return http;
+}

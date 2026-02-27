@@ -1,10 +1,10 @@
 {
   "name": "@convex-dev/stripe",
   "description": "A stripe component for Convex.",
-  "repository": "github:get-convex/stripe",
-  "homepage": "https://github.com/get-convex/stripe#readme",
+  "repository": "github:amp127/convex-stripe-ultra",
+  "homepage": "https://github.com/amp127/convex-stripe-ultra#readme",
   "bugs": {
-    "url": "https://github.com/get-convex/stripe/issues"
+    "url": "https://github.com/amp127/convex-stripe-ultra/issues"
   },
   "version": "0.1.3",
   "license": "Apache-2.0",
@@ -64,7 +64,8 @@
   },
   "peerDependencies": {
     "convex": "^1.29.3",
-    "react": "^18.3.1 || ^19.0.0"
+    "react": "^18.3.1 || ^19.0.0",
+    "stripe": "^18.5.0 || ^19.0.0 || ^20.0.0"
   },
   "devDependencies": {
     "@clerk/clerk-react": "5.57.0",
@@ -95,12 +96,12 @@
     "typescript": "5.9.3",
     "typescript-eslint": "8.55.0",
     "vite": "6.4.1",
-    "vitest": "3.2.4"
+    "vitest": "3.2.4",
+    "stripe": "^18.5.0"
   },
   "types": "./dist/client/index.d.ts",
   "module": "./dist/client/index.js",
   "dependencies": {
-    "@raideno/convex-stripe": "^0.3.4",
-    "stripe": "^20.4.0"
+    "@raideno/convex-stripe": "^0.3.4"
   }
 }

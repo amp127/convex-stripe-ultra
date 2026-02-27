@@ -1,5 +1,3 @@
-"use node";
-
 import { v } from "convex/values";
 import { action, mutation, query } from "./_generated/server.js";
 import { stripe } from "./stripe.js";
@@ -573,6 +571,45 @@ export const updateSubscriptionQuantity = action({
     }
     await stripe.client.subscriptionItems.update(item.id, {
       quantity: args.quantity,
+    });
+    return null;
+  },
+});
+
+/**
+ * Cancel a subscription either immediately or at period end. Updates Stripe; DB syncs via webhooks.
+ */
+export const cancelSubscription = action({
+  args: {
+    stripeSubscriptionId: v.string(),
+    cancelAtPeriodEnd: v.optional(v.boolean()),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const cancelAtPeriodEnd = args.cancelAtPeriodEnd ?? true;
+
+    if (cancelAtPeriodEnd) {
+      await stripe.client.subscriptions.update(args.stripeSubscriptionId, {
+        cancel_at_period_end: true,
+      });
+    } else {
+      await stripe.client.subscriptions.cancel(args.stripeSubscriptionId);
+    }
+    return null;
+  },
+});
+
+/**
+ * Reactivate a subscription that was set to cancel at period end.
+ */
+export const reactivateSubscription = action({
+  args: {
+    stripeSubscriptionId: v.string(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await stripe.client.subscriptions.update(args.stripeSubscriptionId, {
+      cancel_at_period_end: false,
     });
     return null;
   },

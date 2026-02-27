@@ -10,6 +10,7 @@
 
 import type * as private_ from "../private.js";
 import type * as public_ from "../public.js";
+import type * as stripe from "../stripe.js";
 
 import type {
   ApiFromModules,
@@ -21,6 +22,7 @@ import { anyApi, componentsGeneric } from "convex/server";
 const fullApi: ApiFromModules<{
   private: typeof private_;
   public: typeof public_;
+  stripe: typeof stripe;
 }> = anyApi as any;
 
 /**

@@ -23,153 +23,53 @@ import type { FunctionReference } from "convex/server";
  */
 export type ComponentApi<Name extends string | undefined = string | undefined> =
   {
-    private: {
-      handleCheckoutSessionCompleted: FunctionReference<
-        "mutation",
+    public: {
+      cancelSubscription: FunctionReference<
+        "action",
         "internal",
+        { cancelAtPeriodEnd?: boolean; stripeSubscriptionId: string },
+        null,
+        Name
+      >;
+      createConnectAccount: FunctionReference<
+        "action",
+        "internal",
+        { email?: string; entityId: string; params?: any },
+        { _id: string; accountId: string },
+        Name
+      >;
+      createConnectAccountLink: FunctionReference<
+        "action",
+        "internal",
+        {
+          accountId: string;
+          failureUrl?: string;
+          params?: any;
+          refreshUrl: string;
+          returnUrl: string;
+          type?: string;
+        },
+        { url: string },
+        Name
+      >;
+      createOrUpdateCustomer: FunctionReference<
+        "action",
+        "internal",
+        { email?: string; entityId: string; metadata?: any; name?: string },
+        string,
+        Name
+      >;
+      getCheckoutSession: FunctionReference<
+        "query",
+        "internal",
+        { stripeCheckoutSessionId: string },
         {
           metadata?: any;
           mode: string;
+          status: string;
           stripeCheckoutSessionId: string;
           stripeCustomerId?: string;
-        },
-        null,
-        Name
-      >;
-      handleCustomerCreated: FunctionReference<
-        "mutation",
-        "internal",
-        {
-          email?: string;
-          metadata?: any;
-          name?: string;
-          stripeCustomerId: string;
-        },
-        null,
-        Name
-      >;
-      handleCustomerUpdated: FunctionReference<
-        "mutation",
-        "internal",
-        {
-          email?: string;
-          metadata?: any;
-          name?: string;
-          stripeCustomerId: string;
-        },
-        null,
-        Name
-      >;
-      handleInvoiceCreated: FunctionReference<
-        "mutation",
-        "internal",
-        {
-          amountDue: number;
-          amountPaid: number;
-          created: number;
-          status: string;
-          stripeCustomerId: string;
-          stripeInvoiceId: string;
-          stripeSubscriptionId?: string;
-        },
-        null,
-        Name
-      >;
-      handleInvoicePaid: FunctionReference<
-        "mutation",
-        "internal",
-        { amountPaid: number; stripeInvoiceId: string },
-        null,
-        Name
-      >;
-      handleInvoicePaymentFailed: FunctionReference<
-        "mutation",
-        "internal",
-        { stripeInvoiceId: string },
-        null,
-        Name
-      >;
-      handlePaymentIntentSucceeded: FunctionReference<
-        "mutation",
-        "internal",
-        {
-          amount: number;
-          created: number;
-          currency: string;
-          metadata?: any;
-          status: string;
-          stripeCustomerId?: string;
-          stripePaymentIntentId: string;
-        },
-        null,
-        Name
-      >;
-      handleSubscriptionCreated: FunctionReference<
-        "mutation",
-        "internal",
-        {
-          cancelAt?: number;
-          cancelAtPeriodEnd: boolean;
-          currentPeriodEnd: number;
-          metadata?: any;
-          priceId: string;
-          quantity?: number;
-          status: string;
-          stripeCustomerId: string;
-          stripeSubscriptionId: string;
-        },
-        null,
-        Name
-      >;
-      handleSubscriptionDeleted: FunctionReference<
-        "mutation",
-        "internal",
-        { stripeSubscriptionId: string },
-        null,
-        Name
-      >;
-      handleSubscriptionUpdated: FunctionReference<
-        "mutation",
-        "internal",
-        {
-          cancelAt?: number;
-          cancelAtPeriodEnd: boolean;
-          currentPeriodEnd: number;
-          metadata?: any;
-          priceId?: string;
-          quantity?: number;
-          status: string;
-          stripeSubscriptionId: string;
-        },
-        null,
-        Name
-      >;
-      updatePaymentCustomer: FunctionReference<
-        "mutation",
-        "internal",
-        { stripeCustomerId: string; stripePaymentIntentId: string },
-        null,
-        Name
-      >;
-      updateSubscriptionQuantityInternal: FunctionReference<
-        "mutation",
-        "internal",
-        { quantity: number; stripeSubscriptionId: string },
-        null,
-        Name
-      >;
-    };
-    public: {
-      createOrUpdateCustomer: FunctionReference<
-        "mutation",
-        "internal",
-        {
-          email?: string;
-          metadata?: any;
-          name?: string;
-          stripeCustomerId: string;
-        },
-        string,
+        } | null,
         Name
       >;
       getCustomer: FunctionReference<
@@ -181,6 +81,33 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           metadata?: any;
           name?: string;
           stripeCustomerId: string;
+          userId?: string;
+        } | null,
+        Name
+      >;
+      getCustomerByEmail: FunctionReference<
+        "query",
+        "internal",
+        { email: string },
+        {
+          email?: string;
+          metadata?: any;
+          name?: string;
+          stripeCustomerId: string;
+          userId?: string;
+        } | null,
+        Name
+      >;
+      getCustomerByUserId: FunctionReference<
+        "query",
+        "internal",
+        { userId: string },
+        {
+          email?: string;
+          metadata?: any;
+          name?: string;
+          stripeCustomerId: string;
+          userId?: string;
         } | null,
         Name
       >;
@@ -237,6 +164,19 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           stripeSubscriptionId: string;
           userId?: string;
         } | null,
+        Name
+      >;
+      listCheckoutSessions: FunctionReference<
+        "query",
+        "internal",
+        { stripeCustomerId: string },
+        Array<{
+          metadata?: any;
+          mode: string;
+          status: string;
+          stripeCheckoutSessionId: string;
+          stripeCustomerId?: string;
+        }>,
         Name
       >;
       listInvoices: FunctionReference<
@@ -360,6 +300,25 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         }>,
         Name
       >;
+      listSubscriptionsByOrgId: FunctionReference<
+        "query",
+        "internal",
+        { orgId: string },
+        Array<{
+          cancelAt?: number;
+          cancelAtPeriodEnd: boolean;
+          currentPeriodEnd: number;
+          metadata?: any;
+          orgId?: string;
+          priceId: string;
+          quantity?: number;
+          status: string;
+          stripeCustomerId: string;
+          stripeSubscriptionId: string;
+          userId?: string;
+        }>,
+        Name
+      >;
       listSubscriptionsByUserId: FunctionReference<
         "query",
         "internal",
@@ -379,8 +338,53 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         }>,
         Name
       >;
+      pay: FunctionReference<
+        "action",
+        "internal",
+        {
+          cancelUrl: string;
+          entityId: string;
+          failureUrl?: string;
+          lineItems: Array<{ price: string; quantity?: number }>;
+          metadata?: any;
+          referenceId: string;
+          successUrl: string;
+        },
+        { sessionId: string; url: string | null },
+        Name
+      >;
+      portal: FunctionReference<
+        "action",
+        "internal",
+        { entityId: string; failureUrl?: string; returnUrl: string },
+        { url: string | null },
+        Name
+      >;
+      reactivateSubscription: FunctionReference<
+        "action",
+        "internal",
+        { stripeSubscriptionId: string },
+        null,
+        Name
+      >;
+      subscribe: FunctionReference<
+        "action",
+        "internal",
+        {
+          cancelUrl: string;
+          entityId: string;
+          failureUrl?: string;
+          metadata?: any;
+          priceId: string;
+          quantity?: number;
+          subscriptionData?: any;
+          successUrl: string;
+        },
+        { sessionId: string; url: string | null },
+        Name
+      >;
       updateSubscriptionMetadata: FunctionReference<
-        "mutation",
+        "action",
         "internal",
         {
           metadata: any;
@@ -394,7 +398,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
       updateSubscriptionQuantity: FunctionReference<
         "action",
         "internal",
-        { apiKey: string; quantity: number; stripeSubscriptionId: string },
+        { quantity: number; stripeSubscriptionId: string },
         null,
         Name
       >;

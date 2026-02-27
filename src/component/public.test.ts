@@ -7,15 +7,13 @@ import { modules } from "./setup.test.js";
 test("customer creation and retrieval", async () => {
   const t = convexTest(schema, modules);
 
-  // Create a customer
-  const customerId = await t.mutation(api.public.createOrUpdateCustomer, {
+  // Seed a customer (createOrUpdateCustomer is now an action that calls Stripe API)
+  await t.mutation(api.private.handleCustomerCreated, {
     stripeCustomerId: "cus_test123",
     email: "test@example.com",
     name: "Test User",
     metadata: { userId: "user_123" },
   });
-
-  expect(customerId).toBeDefined();
 
   // Retrieve the customer
   const customer = await t.query(api.public.getCustomer, {
@@ -32,14 +30,14 @@ test("customer update", async () => {
   const t = convexTest(schema, modules);
 
   // Create initial customer
-  await t.mutation(api.public.createOrUpdateCustomer, {
+  await t.mutation(api.private.handleCustomerCreated, {
     stripeCustomerId: "cus_test456",
     email: "old@example.com",
     name: "Old Name",
   });
 
-  // Update customer
-  await t.mutation(api.public.createOrUpdateCustomer, {
+  // Update customer (handleCustomerCreated upserts)
+  await t.mutation(api.private.handleCustomerCreated, {
     stripeCustomerId: "cus_test456",
     email: "new@example.com",
     name: "New Name",
@@ -130,6 +128,11 @@ test("list subscriptions for customer", async () => {
 test("update subscription metadata for custom lookups", async () => {
   const t = convexTest(schema, modules);
 
+  await t.mutation(api.private.handleCustomerCreated, {
+    stripeCustomerId: "cus_test",
+    email: "test@test.com",
+  });
+
   // Create subscription
   await t.mutation(api.private.handleSubscriptionCreated, {
     stripeSubscriptionId: "sub_metadata",
@@ -140,9 +143,13 @@ test("update subscription metadata for custom lookups", async () => {
     priceId: "price_test",
   });
 
-  // Update metadata
-  await t.mutation(api.public.updateSubscriptionMetadata, {
+  // Update metadata (updateSubscriptionMetadata is an action; we use handleSubscriptionUpdated for unit test)
+  await t.mutation(api.private.handleSubscriptionUpdated, {
     stripeSubscriptionId: "sub_metadata",
+    status: "active",
+    currentPeriodEnd: Date.now(),
+    cancelAtPeriodEnd: false,
+    priceId: "price_test",
     metadata: {
       orgId: "org_456",
       userId: "user_789",
@@ -164,6 +171,11 @@ test("update subscription metadata for custom lookups", async () => {
 
 test("subscription status update via webhook", async () => {
   const t = convexTest(schema, modules);
+
+  await t.mutation(api.private.handleCustomerCreated, {
+    stripeCustomerId: "cus_test",
+    email: "test@test.com",
+  });
 
   // Create initial subscription
   await t.mutation(api.private.handleSubscriptionCreated, {
@@ -194,6 +206,11 @@ test("subscription status update via webhook", async () => {
 test("subscription plan change updates priceId", async () => {
   const t = convexTest(schema, modules);
 
+  await t.mutation(api.private.handleCustomerCreated, {
+    stripeCustomerId: "cus_test",
+    email: "test@test.com",
+  });
+
   await t.mutation(api.private.handleSubscriptionCreated, {
     stripeSubscriptionId: "sub_plan_change",
     stripeCustomerId: "cus_test",
@@ -220,6 +237,11 @@ test("subscription plan change updates priceId", async () => {
 
 test("subscription cancel_at sets cancelAtPeriodEnd when it matches currentPeriodEnd", async () => {
   const t = convexTest(schema, modules);
+
+  await t.mutation(api.private.handleCustomerCreated, {
+    stripeCustomerId: "cus_test",
+    email: "test@test.com",
+  });
 
   const currentPeriodEnd = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60;
 
@@ -251,6 +273,11 @@ test("subscription cancel_at sets cancelAtPeriodEnd when it matches currentPerio
 
 test("seat quantity update", async () => {
   const t = convexTest(schema, modules);
+
+  await t.mutation(api.private.handleCustomerCreated, {
+    stripeCustomerId: "cus_test",
+    email: "test@test.com",
+  });
 
   // Create subscription with initial quantity
   await t.mutation(api.private.handleSubscriptionCreated, {
@@ -410,6 +437,18 @@ test("list payments by customer ID", async () => {
 test("list payments by user ID", async () => {
   const t = convexTest(schema, modules);
 
+  // Seed customers with entityId (listPaymentsByUserId looks up by customer.entityId)
+  await t.mutation(api.private.handleCustomerCreated, {
+    stripeCustomerId: "cus_test",
+    email: "alice@test.com",
+    entityId: "user_alice",
+  });
+  await t.mutation(api.private.handleCustomerCreated, {
+    stripeCustomerId: "cus_test2",
+    email: "bob@test.com",
+    entityId: "user_bob",
+  });
+
   // Create payments with different user IDs
   await t.mutation(api.private.handlePaymentIntentSucceeded, {
     stripePaymentIntentId: "pi_user1",
@@ -452,6 +491,16 @@ test("list payments by user ID", async () => {
 
 test("list payments by org ID", async () => {
   const t = convexTest(schema, modules);
+
+  // Seed customers for stripeCustomerId link
+  await t.mutation(api.private.handleCustomerCreated, {
+    stripeCustomerId: "cus_test",
+    email: "test@test.com",
+  });
+  await t.mutation(api.private.handleCustomerCreated, {
+    stripeCustomerId: "cus_test2",
+    email: "test2@test.com",
+  });
 
   // Create payments with different org IDs
   await t.mutation(api.private.handlePaymentIntentSucceeded, {
