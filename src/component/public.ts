@@ -1,19 +1,188 @@
+"use node";
+
 import { v } from "convex/values";
 import { action, mutation, query } from "./_generated/server.js";
-import { api } from "./_generated/api.js";
-import schema from "./schema.js";
-import StripeSDK from "stripe";
+import { stripe } from "./stripe.js";
 
 // ============================================================================
-// VALIDATOR HELPERS
+// VALIDATOR HELPERS (legacy-shaped return types for backward compatibility)
 // ============================================================================
 
-// Reusable validators that omit system fields (_id, _creationTime)
-const customerValidator = schema.tables.customers.validator;
-const subscriptionValidator = schema.tables.subscriptions.validator;
-const checkoutSessionValidator = schema.tables.checkout_sessions.validator;
-const paymentValidator = schema.tables.payments.validator;
-const invoiceValidator = schema.tables.invoices.validator;
+const customerReturnValidator = v.union(
+  v.object({
+    stripeCustomerId: v.string(),
+    email: v.optional(v.string()),
+    name: v.optional(v.string()),
+    metadata: v.optional(v.any()),
+    userId: v.optional(v.string()),
+  }),
+  v.null(),
+);
+
+const subscriptionShape = v.object({
+  stripeSubscriptionId: v.string(),
+  stripeCustomerId: v.string(),
+  status: v.string(),
+  currentPeriodEnd: v.number(),
+  cancelAtPeriodEnd: v.boolean(),
+  cancelAt: v.optional(v.number()),
+  quantity: v.optional(v.number()),
+  priceId: v.string(),
+  metadata: v.optional(v.any()),
+  orgId: v.optional(v.string()),
+  userId: v.optional(v.string()),
+});
+
+const subscriptionReturnValidator = v.union(subscriptionShape, v.null());
+
+const paymentShape = v.object({
+  stripePaymentIntentId: v.string(),
+  stripeCustomerId: v.optional(v.string()),
+  amount: v.number(),
+  currency: v.string(),
+  status: v.string(),
+  created: v.number(),
+  metadata: v.optional(v.any()),
+  orgId: v.optional(v.string()),
+  userId: v.optional(v.string()),
+});
+
+const paymentReturnValidator = v.union(paymentShape, v.null());
+
+const invoiceShape = v.object({
+  stripeInvoiceId: v.string(),
+  stripeCustomerId: v.string(),
+  stripeSubscriptionId: v.optional(v.string()),
+  status: v.string(),
+  amountDue: v.number(),
+  amountPaid: v.number(),
+  created: v.number(),
+  orgId: v.optional(v.string()),
+  userId: v.optional(v.string()),
+});
+
+const invoiceReturnValidator = v.union(invoiceShape, v.null());
+
+const checkoutSessionShape = v.object({
+  stripeCheckoutSessionId: v.string(),
+  stripeCustomerId: v.optional(v.string()),
+  status: v.string(),
+  mode: v.string(),
+  metadata: v.optional(v.any()),
+});
+
+const checkoutSessionReturnValidator = v.union(
+  checkoutSessionShape,
+  v.null(),
+);
+
+function mapCustomerDoc(doc: {
+  customerId: string;
+  entityId?: string;
+  stripe?: { email?: string | null; name?: string | null; metadata?: Record<string, string | number | null> | null };
+} | null) {
+  if (!doc) return null;
+  const metadata = (doc.stripe?.metadata ?? {}) as Record<string, string>;
+  return {
+    stripeCustomerId: doc.customerId,
+    email: doc.stripe?.email ?? undefined,
+    name: doc.stripe?.name ?? undefined,
+    metadata: doc.stripe?.metadata ?? undefined,
+    userId: doc.entityId ?? metadata?.userId,
+  };
+}
+
+function mapSubscriptionDoc(doc: {
+  subscriptionId: string | null;
+  customerId: string;
+  stripe?: any;
+} | null) {
+  if (!doc || !doc.subscriptionId) return null;
+  const s = doc.stripe;
+  const item = s?.items?.data?.[0];
+  const metadata = (s?.metadata ?? {}) as Record<string, string>;
+  return {
+    stripeSubscriptionId: doc.subscriptionId,
+    stripeCustomerId: doc.customerId,
+    status: (s?.status as string) ?? "unknown",
+    currentPeriodEnd: (item?.current_period_end as number) ?? 0,
+    cancelAtPeriodEnd: Boolean(s?.cancel_at_period_end),
+    cancelAt: (s?.cancel_at as number) ?? undefined,
+    quantity: (item?.quantity as number) ?? undefined,
+    priceId: (item?.price?.id as string) ?? "",
+    metadata: s?.metadata,
+    orgId: metadata?.orgId,
+    userId: metadata?.userId,
+  };
+}
+
+function mapPaymentDoc(doc: {
+  paymentIntentId: string;
+  stripe?: { customer?: string | null; amount?: number; currency?: string | null; status?: string; created?: number; metadata?: Record<string, string | number | null> | null };
+} | null) {
+  if (!doc) return null;
+  const metadata = (doc.stripe?.metadata ?? {}) as Record<string, string>;
+  return {
+    stripePaymentIntentId: doc.paymentIntentId,
+    stripeCustomerId: doc.stripe?.customer ?? undefined,
+    amount: doc.stripe?.amount ?? 0,
+    currency: (doc.stripe?.currency as string) ?? "",
+    status: (doc.stripe?.status as string) ?? "",
+    created: (doc.stripe?.created as number) ?? 0,
+    metadata: doc.stripe?.metadata,
+    orgId: metadata?.orgId,
+    userId: metadata?.userId,
+  };
+}
+
+function mapInvoiceDoc(
+  doc: {
+    invoiceId: string;
+    stripe?: Record<string, unknown> & {
+      customer?: string;
+      subscription?: string | null;
+      status?: string;
+      amount_due?: number;
+      amount_paid?: number;
+      created?: number;
+    };
+  } | null,
+  subscriptionMetadata?: { orgId?: string; userId?: string },
+) {
+  if (!doc) return null;
+  return {
+    stripeInvoiceId: doc.invoiceId,
+    stripeCustomerId: (doc.stripe?.customer as string) ?? "",
+    stripeSubscriptionId: (doc.stripe?.subscription as string) ?? undefined,
+    status: (doc.stripe?.status as string) ?? "",
+    amountDue: (doc.stripe?.amount_due as number) ?? 0,
+    amountPaid: (doc.stripe?.amount_paid as number) ?? 0,
+    created: (doc.stripe?.created as number) ?? 0,
+    orgId: subscriptionMetadata?.orgId,
+    userId: subscriptionMetadata?.userId,
+  };
+}
+
+function mapCheckoutSessionDoc(
+  doc: {
+    checkoutSessionId: string;
+    stripe?: {
+      customer?: string | null;
+      status?: string | null;
+      mode?: string;
+      metadata?: Record<string, string | number | null> | null;
+    };
+  } | null,
+) {
+  if (!doc) return null;
+  return {
+    stripeCheckoutSessionId: doc.checkoutSessionId,
+    stripeCustomerId: doc.stripe?.customer ?? undefined,
+    status: doc.stripe?.status ?? "",
+    mode: (doc.stripe?.mode as string) ?? "payment",
+    metadata: doc.stripe?.metadata ?? undefined,
+  };
+}
 
 // ============================================================================
 // PUBLIC QUERIES
@@ -24,53 +193,41 @@ const invoiceValidator = schema.tables.invoices.validator;
  */
 export const getCustomer = query({
   args: { stripeCustomerId: v.string() },
-  returns: v.union(customerValidator, v.null()),
+  returns: customerReturnValidator,
   handler: async (ctx, args) => {
     const customer = await ctx.db
-      .query("customers")
-      .withIndex("by_stripe_customer_id", (q) =>
-        q.eq("stripeCustomerId", args.stripeCustomerId),
-      )
+      .query("stripeCustomers")
+      .withIndex("byStripeId", (q) => q.eq("customerId", args.stripeCustomerId))
       .unique();
-    if (!customer) return null;
-    const { _id, _creationTime, ...data } = customer;
-    return data;
+    return mapCustomerDoc(customer);
   },
 });
 
 /**
  * Get a customer by their email address.
- * Uses the by_email index for efficient lookup.
  */
 export const getCustomerByEmail = query({
   args: { email: v.string() },
-  returns: v.union(customerValidator, v.null()),
+  returns: customerReturnValidator,
   handler: async (ctx, args) => {
-    const customer = await ctx.db
-      .query("customers")
-      .withIndex("by_email", (q) => q.eq("email", args.email))
-      .first();
-    if (!customer) return null;
-    const { _id, _creationTime, ...data } = customer;
-    return data;
+    const all = await ctx.db.query("stripeCustomers").collect();
+    const customer = all.find((c) => c.stripe?.email === args.email) ?? null;
+    return mapCustomerDoc(customer);
   },
 });
 
 /**
- * Get a customer by their user ID.
- * Uses the by_user_id index for efficient lookup.
+ * Get a customer by their user ID (entityId).
  */
 export const getCustomerByUserId = query({
   args: { userId: v.string() },
-  returns: v.union(customerValidator, v.null()),
+  returns: customerReturnValidator,
   handler: async (ctx, args) => {
     const customer = await ctx.db
-      .query("customers")
-      .withIndex("by_user_id", (q) => q.eq("userId", args.userId))
+      .query("stripeCustomers")
+      .withIndex("byEntityId", (q) => q.eq("entityId", args.userId))
       .first();
-    if (!customer) return null;
-    const { _id, _creationTime, ...data } = customer;
-    return data;
+    return mapCustomerDoc(customer);
   },
 });
 
@@ -79,17 +236,15 @@ export const getCustomerByUserId = query({
  */
 export const getSubscription = query({
   args: { stripeSubscriptionId: v.string() },
-  returns: v.union(subscriptionValidator, v.null()),
+  returns: subscriptionReturnValidator,
   handler: async (ctx, args) => {
     const subscription = await ctx.db
-      .query("subscriptions")
-      .withIndex("by_stripe_subscription_id", (q) =>
-        q.eq("stripeSubscriptionId", args.stripeSubscriptionId),
+      .query("stripeSubscriptions")
+      .withIndex("byStripeId", (q) =>
+        q.eq("subscriptionId", args.stripeSubscriptionId),
       )
       .unique();
-    if (!subscription) return null;
-    const { _id, _creationTime, ...data } = subscription;
-    return data;
+    return mapSubscriptionDoc(subscription);
   },
 });
 
@@ -98,33 +253,32 @@ export const getSubscription = query({
  */
 export const listSubscriptions = query({
   args: { stripeCustomerId: v.string() },
-  returns: v.array(subscriptionValidator),
+  returns: v.array(subscriptionShape),
   handler: async (ctx, args) => {
     const subscriptions = await ctx.db
-      .query("subscriptions")
-      .withIndex("by_stripe_customer_id", (q) =>
-        q.eq("stripeCustomerId", args.stripeCustomerId),
+      .query("stripeSubscriptions")
+      .withIndex("byCustomerId", (q) =>
+        q.eq("customerId", args.stripeCustomerId),
       )
       .collect();
-    return subscriptions.map(({ _id, _creationTime, ...data }) => data);
+    return subscriptions
+      .map((s) => mapSubscriptionDoc(s))
+      .filter((x): x is NonNullable<ReturnType<typeof mapSubscriptionDoc>> => x != null);
   },
 });
 
 /**
- * Get a subscription by organization ID.
- * Useful for looking up subscriptions by custom orgId.
+ * Get a subscription by organization ID (via metadata).
  */
 export const getSubscriptionByOrgId = query({
   args: { orgId: v.string() },
-  returns: v.union(subscriptionValidator, v.null()),
+  returns: subscriptionReturnValidator,
   handler: async (ctx, args) => {
-    const subscription = await ctx.db
-      .query("subscriptions")
-      .withIndex("by_org_id", (q) => q.eq("orgId", args.orgId))
-      .first();
-    if (!subscription) return null;
-    const { _id, _creationTime, ...data } = subscription;
-    return data;
+    const all = await ctx.db.query("stripeSubscriptions").collect();
+    const sub = all.find(
+      (s) => (s.stripe?.metadata as Record<string, string> | undefined)?.orgId === args.orgId,
+    );
+    return mapSubscriptionDoc(sub ?? null);
   },
 });
 
@@ -133,29 +287,37 @@ export const getSubscriptionByOrgId = query({
  */
 export const listSubscriptionsByOrgId = query({
   args: { orgId: v.string() },
-  returns: v.array(subscriptionValidator),
+  returns: v.array(subscriptionShape),
   handler: async (ctx, args) => {
-    const subscriptions = await ctx.db
-      .query("subscriptions")
-      .withIndex("by_org_id", (q) => q.eq("orgId", args.orgId))
-      .collect();
-    return subscriptions.map(({ _id, _creationTime, ...data }) => data);
+    const all = await ctx.db.query("stripeSubscriptions").collect();
+    const filtered = all.filter(
+      (s) => (s.stripe?.metadata as Record<string, string> | undefined)?.orgId === args.orgId,
+    );
+    return filtered
+      .map((s) => mapSubscriptionDoc(s))
+      .filter((x): x is NonNullable<ReturnType<typeof mapSubscriptionDoc>> => x != null);
   },
 });
 
 /**
- * List all subscriptions for a user ID.
- * Useful for looking up subscriptions by custom userId.
+ * List all subscriptions for a user ID (entityId); two-step via customer.
  */
 export const listSubscriptionsByUserId = query({
   args: { userId: v.string() },
-  returns: v.array(subscriptionValidator),
+  returns: v.array(subscriptionShape),
   handler: async (ctx, args) => {
+    const customer = await ctx.db
+      .query("stripeCustomers")
+      .withIndex("byEntityId", (q) => q.eq("entityId", args.userId))
+      .first();
+    if (!customer) return [];
     const subscriptions = await ctx.db
-      .query("subscriptions")
-      .withIndex("by_user_id", (q) => q.eq("userId", args.userId))
+      .query("stripeSubscriptions")
+      .withIndex("byCustomerId", (q) => q.eq("customerId", customer.customerId))
       .collect();
-    return subscriptions.map(({ _id, _creationTime, ...data }) => data);
+    return subscriptions
+      .map((s) => mapSubscriptionDoc(s))
+      .filter((x): x is NonNullable<ReturnType<typeof mapSubscriptionDoc>> => x != null);
   },
 });
 
@@ -164,17 +326,15 @@ export const listSubscriptionsByUserId = query({
  */
 export const getPayment = query({
   args: { stripePaymentIntentId: v.string() },
-  returns: v.union(paymentValidator, v.null()),
+  returns: paymentReturnValidator,
   handler: async (ctx, args) => {
     const payment = await ctx.db
-      .query("payments")
-      .withIndex("by_stripe_payment_intent_id", (q) =>
-        q.eq("stripePaymentIntentId", args.stripePaymentIntentId),
+      .query("stripePaymentIntents")
+      .withIndex("byStripeId", (q) =>
+        q.eq("paymentIntentId", args.stripePaymentIntentId),
       )
       .unique();
-    if (!payment) return null;
-    const { _id, _creationTime, ...data } = payment;
-    return data;
+    return mapPaymentDoc(payment);
   },
 });
 
@@ -183,45 +343,54 @@ export const getPayment = query({
  */
 export const listPayments = query({
   args: { stripeCustomerId: v.string() },
-  returns: v.array(paymentValidator),
+  returns: v.array(paymentShape),
   handler: async (ctx, args) => {
-    const payments = await ctx.db
-      .query("payments")
-      .withIndex("by_stripe_customer_id", (q) =>
-        q.eq("stripeCustomerId", args.stripeCustomerId),
-      )
-      .collect();
-    return payments.map(({ _id, _creationTime, ...data }) => data);
+    const all = await ctx.db.query("stripePaymentIntents").collect();
+    const filtered = all.filter(
+      (p) => p.stripe?.customer === args.stripeCustomerId,
+    );
+    return filtered
+      .map((p) => mapPaymentDoc(p))
+      .filter((x): x is NonNullable<ReturnType<typeof mapPaymentDoc>> => x != null);
   },
 });
 
 /**
- * List payments for a user ID.
+ * List payments for a user ID (via customer lookup and metadata).
  */
 export const listPaymentsByUserId = query({
   args: { userId: v.string() },
-  returns: v.array(paymentValidator),
+  returns: v.array(paymentShape),
   handler: async (ctx, args) => {
-    const payments = await ctx.db
-      .query("payments")
-      .withIndex("by_user_id", (q) => q.eq("userId", args.userId))
-      .collect();
-    return payments.map(({ _id, _creationTime, ...data }) => data);
+    const customer = await ctx.db
+      .query("stripeCustomers")
+      .withIndex("byEntityId", (q) => q.eq("entityId", args.userId))
+      .first();
+    if (!customer) return [];
+    const all = await ctx.db.query("stripePaymentIntents").collect();
+    const filtered = all.filter(
+      (p) => p.stripe?.customer === customer.customerId,
+    );
+    return filtered
+      .map((p) => mapPaymentDoc(p))
+      .filter((x): x is NonNullable<ReturnType<typeof mapPaymentDoc>> => x != null);
   },
 });
 
 /**
- * List payments for an organization ID.
+ * List payments for an organization ID (metadata).
  */
 export const listPaymentsByOrgId = query({
   args: { orgId: v.string() },
-  returns: v.array(paymentValidator),
+  returns: v.array(paymentShape),
   handler: async (ctx, args) => {
-    const payments = await ctx.db
-      .query("payments")
-      .withIndex("by_org_id", (q) => q.eq("orgId", args.orgId))
-      .collect();
-    return payments.map(({ _id, _creationTime, ...data }) => data);
+    const all = await ctx.db.query("stripePaymentIntents").collect();
+    const filtered = all.filter(
+      (p) => (p.stripe?.metadata as Record<string, string> | undefined)?.orgId === args.orgId,
+    );
+    return filtered
+      .map((p) => mapPaymentDoc(p))
+      .filter((x): x is NonNullable<ReturnType<typeof mapPaymentDoc>> => x != null);
   },
 });
 
@@ -230,45 +399,67 @@ export const listPaymentsByOrgId = query({
  */
 export const listInvoices = query({
   args: { stripeCustomerId: v.string() },
-  returns: v.array(invoiceValidator),
+  returns: v.array(invoiceShape),
   handler: async (ctx, args) => {
-    const invoices = await ctx.db
-      .query("invoices")
-      .withIndex("by_stripe_customer_id", (q) =>
-        q.eq("stripeCustomerId", args.stripeCustomerId),
-      )
-      .collect();
-    return invoices.map(({ _id, _creationTime, ...data }) => data);
+    const all = await ctx.db.query("stripeInvoices").collect();
+    const filtered = all.filter(
+      (i) => i.stripe?.customer === args.stripeCustomerId,
+    );
+    return filtered
+      .map((i) => mapInvoiceDoc(i))
+      .filter((x): x is NonNullable<ReturnType<typeof mapInvoiceDoc>> => x != null);
   },
 });
 
 /**
- * List invoices for an organization ID.
+ * List invoices for an organization ID (via subscription metadata).
  */
 export const listInvoicesByOrgId = query({
   args: { orgId: v.string() },
-  returns: v.array(invoiceValidator),
+  returns: v.array(invoiceShape),
   handler: async (ctx, args) => {
-    const invoices = await ctx.db
-      .query("invoices")
-      .withIndex("by_org_id", (q) => q.eq("orgId", args.orgId))
-      .collect();
-    return invoices.map(({ _id, _creationTime, ...data }) => data);
+    const subs = await ctx.db.query("stripeSubscriptions").collect();
+    const bySubId = new Map(
+      subs
+        .filter(
+          (s) => (s.stripe?.metadata as Record<string, string> | undefined)?.orgId === args.orgId,
+        )
+        .map((s) => [s.subscriptionId, { orgId: args.orgId, userId: undefined as string | undefined }]),
+    );
+    const all = await ctx.db.query("stripeInvoices").collect();
+    const getSubId = (i: (typeof all)[number]) =>
+      (i.stripe as { subscription?: string } | undefined)?.subscription;
+    const filtered = all.filter((i) => {
+      const subId = getSubId(i);
+      return subId ? bySubId.has(subId) : false;
+    });
+    return filtered
+      .map((i) =>
+        mapInvoiceDoc(i, getSubId(i) ? bySubId.get(getSubId(i)!) : undefined),
+      )
+      .filter((x): x is NonNullable<ReturnType<typeof mapInvoiceDoc>> => x != null);
   },
 });
 
 /**
- * List invoices for a user ID.
+ * List invoices for a user ID (via customer and subscription metadata).
  */
 export const listInvoicesByUserId = query({
   args: { userId: v.string() },
-  returns: v.array(invoiceValidator),
+  returns: v.array(invoiceShape),
   handler: async (ctx, args) => {
-    const invoices = await ctx.db
-      .query("invoices")
-      .withIndex("by_user_id", (q) => q.eq("userId", args.userId))
-      .collect();
-    return invoices.map(({ _id, _creationTime, ...data }) => data);
+    const customer = await ctx.db
+      .query("stripeCustomers")
+      .withIndex("byEntityId", (q) => q.eq("entityId", args.userId))
+      .first();
+    if (!customer) return [];
+    const all = await ctx.db.query("stripeInvoices").collect();
+    const filtered = all.filter(
+      (i) => i.stripe?.customer === customer.customerId,
+    );
+    return filtered
+      .map((i) => mapInvoiceDoc(i, { userId: args.userId }))
+      .filter((x): x is NonNullable<ReturnType<typeof mapInvoiceDoc>> => x != null);
   },
 });
 
@@ -277,17 +468,15 @@ export const listInvoicesByUserId = query({
  */
 export const getCheckoutSession = query({
   args: { stripeCheckoutSessionId: v.string() },
-  returns: v.union(checkoutSessionValidator, v.null()),
+  returns: checkoutSessionReturnValidator,
   handler: async (ctx, args) => {
     const session = await ctx.db
-      .query("checkout_sessions")
-      .withIndex("by_stripe_checkout_session_id", (q) =>
-        q.eq("stripeCheckoutSessionId", args.stripeCheckoutSessionId),
+      .query("stripeCheckoutSessions")
+      .withIndex("byStripeId", (q) =>
+        q.eq("checkoutSessionId", args.stripeCheckoutSessionId),
       )
       .unique();
-    if (!session) return null;
-    const { _id, _creationTime, ...data } = session;
-    return data;
+    return mapCheckoutSessionDoc(session);
   },
 });
 
@@ -296,15 +485,15 @@ export const getCheckoutSession = query({
  */
 export const listCheckoutSessions = query({
   args: { stripeCustomerId: v.string() },
-  returns: v.array(checkoutSessionValidator),
+  returns: v.array(checkoutSessionShape),
   handler: async (ctx, args) => {
-    const sessions = await ctx.db
-      .query("checkout_sessions")
-      .withIndex("by_stripe_customer_id", (q) =>
-        q.eq("stripeCustomerId", args.stripeCustomerId),
-      )
-      .collect();
-    return sessions.map(({ _id, _creationTime, ...data }) => data);
+    const all = await ctx.db.query("stripeCheckoutSessions").collect();
+    const filtered = all.filter(
+      (s) => s.stripe?.customer === args.stripeCustomerId,
+    );
+    return filtered
+      .map((s) => mapCheckoutSessionDoc(s))
+      .filter((x): x is NonNullable<ReturnType<typeof mapCheckoutSessionDoc>> => x != null);
   },
 });
 
@@ -313,54 +502,9 @@ export const listCheckoutSessions = query({
 // ============================================================================
 
 /**
- * Create or update a customer with metadata.
- * Returns the stripeCustomerId for consistency with the API.
+ * Update subscription metadata (orgId/userId and custom metadata) via Stripe API.
  */
-export const createOrUpdateCustomer = mutation({
-  args: {
-    stripeCustomerId: v.string(),
-    email: v.optional(v.string()),
-    name: v.optional(v.string()),
-    metadata: v.optional(v.any()),
-  },
-  returns: v.string(),
-  handler: async (ctx, args) => {
-    const existing = await ctx.db
-      .query("customers")
-      .withIndex("by_stripe_customer_id", (q) =>
-        q.eq("stripeCustomerId", args.stripeCustomerId),
-      )
-      .unique();
-
-    const metadata = args.metadata || {};
-    const userId = metadata.userId as string | undefined;
-
-    if (existing) {
-      await ctx.db.patch(existing._id, {
-        ...(args.email !== undefined && { email: args.email }),
-        ...(args.name !== undefined && { name: args.name }),
-        ...(args.metadata !== undefined && { metadata: args.metadata }),
-        ...(userId !== undefined && { userId }),
-      });
-    } else {
-      await ctx.db.insert("customers", {
-        stripeCustomerId: args.stripeCustomerId,
-        email: args.email,
-        name: args.name,
-        metadata: args.metadata,
-        userId,
-      });
-    }
-    return args.stripeCustomerId;
-  },
-});
-
-/**
- * Update subscription metadata for custom lookups.
- * You can provide orgId and userId for efficient indexed lookups,
- * and additional data in the metadata field.
- */
-export const updateSubscriptionMetadata = mutation({
+export const updateSubscriptionMetadata = action({
   args: {
     stripeSubscriptionId: v.string(),
     metadata: v.any(),
@@ -369,33 +513,49 @@ export const updateSubscriptionMetadata = mutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    const subscription = await ctx.db
-      .query("subscriptions")
-      .withIndex("by_stripe_subscription_id", (q) =>
-        q.eq("stripeSubscriptionId", args.stripeSubscriptionId),
-      )
-      .unique();
-
-    if (!subscription) {
-      throw new Error(
-        `Subscription ${args.stripeSubscriptionId} not found in database`,
-      );
-    }
-
-    await ctx.db.patch(subscription._id, {
-      metadata: args.metadata,
+    const metadata = {
+      ...(typeof args.metadata === "object" && args.metadata !== null
+        ? args.metadata
+        : {}),
       ...(args.orgId !== undefined && { orgId: args.orgId }),
       ...(args.userId !== undefined && { userId: args.userId }),
+    };
+    await stripe.client.subscriptions.update(args.stripeSubscriptionId, {
+      metadata,
     });
-
     return null;
   },
 });
 
+// ============================================================================
+// PUBLIC ACTIONS
+// ============================================================================
+
 /**
- * Update subscription quantity (for seat-based pricing).
- * This will update both Stripe and the local database.
- * Reads STRIPE_SECRET_KEY from environment variables.
+ * Create or get a Stripe customer for the given entity (delegates to package).
+ * Returns the Stripe customer ID.
+ */
+export const createOrUpdateCustomer = action({
+  args: {
+    entityId: v.string(),
+    email: v.optional(v.string()),
+    name: v.optional(v.string()),
+    metadata: v.optional(v.any()),
+  },
+  returns: v.string(),
+  handler: async (ctx, args) => {
+    const customer = await stripe.customers.create(ctx, {
+      entityId: args.entityId,
+      email: args.email,
+      name: args.name,
+      metadata: args.metadata as Record<string, string> | undefined,
+    });
+    return customer.customerId;
+  },
+});
+
+/**
+ * Update subscription quantity (seat-based pricing). Updates Stripe and DB via webhook.
  */
 export const updateSubscriptionQuantity = action({
   args: {
@@ -404,29 +564,158 @@ export const updateSubscriptionQuantity = action({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    const apiKey = process.env.STRIPE_SECRET_KEY;
-    if (!apiKey) {
-      throw new Error("STRIPE_SECRET_KEY environment variable is not set");
-    }
-    const stripe = new StripeSDK(apiKey);
-
-    const subscription = await stripe.subscriptions.retrieve(
+    const subscription = await stripe.client.subscriptions.retrieve(
       args.stripeSubscriptionId,
     );
-
-    if (!subscription.items.data[0]) {
+    const item = subscription.items?.data?.[0];
+    if (!item) {
       throw new Error("Subscription has no items");
     }
-
-    await stripe.subscriptionItems.update(subscription.items.data[0].id, {
+    await stripe.client.subscriptionItems.update(item.id, {
       quantity: args.quantity,
     });
-
-    await ctx.runMutation(api.private.updateSubscriptionQuantityInternal, {
-      stripeSubscriptionId: args.stripeSubscriptionId,
-      quantity: args.quantity,
-    });
-
     return null;
+  },
+});
+
+/**
+ * Create a Stripe Checkout session for subscription (delegates to package).
+ */
+export const subscribe = action({
+  args: {
+    entityId: v.string(),
+    priceId: v.string(),
+    successUrl: v.string(),
+    cancelUrl: v.string(),
+    failureUrl: v.optional(v.string()),
+    quantity: v.optional(v.number()),
+    metadata: v.optional(v.any()),
+    subscriptionData: v.optional(v.any()),
+  },
+  returns: v.object({
+    url: v.union(v.string(), v.null()),
+    sessionId: v.string(),
+  }),
+  handler: async (ctx, args) => {
+    const session = await stripe.subscribe(ctx, {
+      entityId: args.entityId,
+      priceId: args.priceId,
+      mode: "subscription",
+      success_url: args.successUrl,
+      cancel_url: args.cancelUrl,
+      failure_url: args.failureUrl,
+      metadata: args.metadata as Record<string, string> | undefined,
+      subscription_data: args.subscriptionData as Record<string, unknown> | undefined,
+    });
+    return { url: session.url, sessionId: session.id };
+  },
+});
+
+/**
+ * Create a Stripe Checkout session for one-time payment (delegates to package).
+ */
+export const pay = action({
+  args: {
+    entityId: v.string(),
+    referenceId: v.string(),
+    lineItems: v.array(
+      v.object({
+        price: v.string(),
+        quantity: v.optional(v.number()),
+      }),
+    ),
+    successUrl: v.string(),
+    cancelUrl: v.string(),
+    failureUrl: v.optional(v.string()),
+    metadata: v.optional(v.any()),
+  },
+  returns: v.object({
+    url: v.union(v.string(), v.null()),
+    sessionId: v.string(),
+  }),
+  handler: async (ctx, args) => {
+    const session = await stripe.pay(ctx, {
+      entityId: args.entityId,
+      referenceId: args.referenceId,
+      mode: "payment",
+      line_items: args.lineItems.map((item) => ({
+        price: item.price,
+        quantity: item.quantity ?? 1,
+      })),
+      success_url: args.successUrl,
+      cancel_url: args.cancelUrl,
+      failure_url: args.failureUrl,
+      metadata: args.metadata as Record<string, string> | undefined,
+    });
+    return { url: session.url, sessionId: session.id };
+  },
+});
+
+/**
+ * Create a Stripe Billing Portal session (delegates to package).
+ */
+export const portal = action({
+  args: {
+    entityId: v.string(),
+    returnUrl: v.string(),
+    failureUrl: v.optional(v.string()),
+  },
+  returns: v.object({ url: v.union(v.string(), v.null()) }),
+  handler: async (ctx, args) => {
+    const session = await stripe.portal(ctx, {
+      entityId: args.entityId,
+      return_url: args.returnUrl,
+      failure_url: args.failureUrl,
+    });
+    return { url: session.url };
+  },
+});
+
+/**
+ * Create a Stripe Connect account (delegates to package).
+ */
+export const createConnectAccount = action({
+  args: {
+    entityId: v.string(),
+    email: v.optional(v.string()),
+    params: v.optional(v.any()),
+  },
+  returns: v.object({
+    accountId: v.string(),
+    _id: v.id("stripeAccounts"),
+  }),
+  handler: async (ctx, args) => {
+    const account = await stripe.accounts.create(ctx, {
+      entityId: args.entityId,
+      email: args.email,
+      ...(args.params as object),
+    });
+    return { accountId: account.accountId, _id: account._id };
+  },
+});
+
+/**
+ * Create a Stripe Connect Account Link for onboarding (delegates to package).
+ */
+export const createConnectAccountLink = action({
+  args: {
+    accountId: v.string(),
+    refreshUrl: v.string(),
+    returnUrl: v.string(),
+    failureUrl: v.optional(v.string()),
+    type: v.optional(v.string()),
+    params: v.optional(v.any()),
+  },
+  returns: v.object({ url: v.string() }),
+  handler: async (ctx, args) => {
+    const link = await stripe.accounts.link(ctx, {
+      account: args.accountId,
+      refresh_url: args.refreshUrl,
+      return_url: args.returnUrl,
+      failure_url: args.failureUrl,
+      type: (args.type as "account_onboarding" | "account_update") ?? "account_onboarding",
+      ...(args.params as object),
+    });
+    return { url: link.url };
   },
 });

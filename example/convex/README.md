@@ -1,192 +1,90 @@
-# Convex Functions - Stripe Integration
+# Welcome to your Convex functions directory!
 
-This directory contains the Convex backend functions for Benji's Store,
-demonstrating the `@convex-dev/stripe` component.
+Write your Convex functions here.
+See https://docs.convex.dev/functions for more.
 
-## Files
+A query function that takes two arguments looks like:
 
-| File               | Purpose                                   |
-| ------------------ | ----------------------------------------- |
-| `convex.config.ts` | Installs the @convex-dev/stripe component |
-| `auth.config.ts`   | Configures Clerk authentication           |
-| `http.ts`          | Registers Stripe webhook routes           |
-| `schema.ts`        | Database schema (app-specific tables)     |
-| `stripe.ts`        | Stripe actions and queries                |
+```ts
+// convex/myFunctions.ts
+import { query } from "./_generated/server";
+import { v } from "convex/values";
 
-## Quick Reference
-
-### Setting Up the Component
-
-```typescript
-// convex/convex.config.ts
-import { defineApp } from "convex/server";
-import stripe from "@convex-dev/stripe/convex.config.js";
-
-const app = defineApp();
-app.use(stripe);
-
-export default app;
-```
-
-### Creating the Client
-
-```typescript
-// convex/stripe.ts
-import { components } from "./_generated/api";
-import { StripeSubscriptions } from "@convex-dev/stripe";
-
-const stripeClient = new StripeSubscriptions(components.stripe, {});
-```
-
-### Checkout Sessions
-
-```typescript
-// Subscription checkout
-await stripeClient.createCheckoutSession(ctx, {
-  priceId: "price_...",
-  customerId: "cus_...",
-  mode: "subscription",
-  successUrl: "https://example.com/success",
-  cancelUrl: "https://example.com/cancel",
-  subscriptionMetadata: { userId: "user_123" },
-});
-
-// One-time payment checkout
-await stripeClient.createCheckoutSession(ctx, {
-  priceId: "price_...",
-  customerId: "cus_...",
-  mode: "payment",
-  successUrl: "https://example.com/success",
-  cancelUrl: "https://example.com/cancel",
-  paymentIntentMetadata: { userId: "user_123" },
-});
-```
-
-### Customer Management
-
-```typescript
-// Get or create a customer
-const customer = await stripeClient.getOrCreateCustomer(ctx, {
-  userId: identity.subject,
-  email: identity.email,
-  name: identity.name,
-});
-
-// Create customer portal session
-const portal = await stripeClient.createCustomerPortalSession(ctx, {
-  customerId: "cus_...",
-  returnUrl: "https://example.com/profile",
-});
-```
-
-### Subscription Management
-
-```typescript
-// Cancel subscription (at period end)
-await stripeClient.cancelSubscription(ctx, {
-  stripeSubscriptionId: "sub_...",
-  cancelAtPeriodEnd: true, // false = cancel immediately
-});
-
-// Reactivate a subscription set to cancel
-await stripeClient.reactivateSubscription(ctx, {
-  stripeSubscriptionId: "sub_...",
-});
-
-// Update seat count
-await stripeClient.updateSubscriptionQuantity(ctx, {
-  stripeSubscriptionId: "sub_...",
-  quantity: 5,
-});
-```
-
-### Querying Data
-
-```typescript
-// List subscriptions for a user
-const subs = await ctx.runQuery(
-  components.stripe.public.listSubscriptionsByUserId,
-  { userId: "user_123" },
-);
-
-// List payments for a user
-const payments = await ctx.runQuery(
-  components.stripe.public.listPaymentsByUserId,
-  { userId: "user_123" },
-);
-
-// Get subscription by ID
-const sub = await ctx.runQuery(components.stripe.public.getSubscription, {
-  stripeSubscriptionId: "sub_...",
-});
-
-// List invoices for a customer
-const invoices = await ctx.runQuery(components.stripe.public.listInvoices, {
-  stripeCustomerId: "cus_...",
-});
-
-// List invoices for an organization
-const orgInvoices = await ctx.runQuery(
-  components.stripe.public.listInvoicesByOrgId,
-  { orgId: "org_..." },
-);
-```
-
-### Webhook Handling
-
-```typescript
-// convex/http.ts
-import { httpRouter } from "convex/server";
-import { components } from "./_generated/api";
-import { registerRoutes } from "@convex-dev/stripe";
-
-const http = httpRouter();
-
-// Webhook URL will be: https://<deployment>.convex.site/stripe/webhook
-registerRoutes(http, components.stripe, {
-  webhookPath: "/stripe/webhook",
-  // Custom handlers for specific events
-  events: {
-    "customer.subscription.updated": async (ctx, event) => {
-      console.log("Subscription updated:", event.data.object.id);
-    },
+export const myQueryFunction = query({
+  // Validators for arguments.
+  args: {
+    first: v.number(),
+    second: v.string(),
   },
-  // Called for ALL events
-  onEvent: async (ctx, event) => {
-    console.log("Event received:", event.type);
+
+  // Function implementation.
+  handler: async (ctx, args) => {
+    // Read the database as many times as you need here.
+    // See https://docs.convex.dev/database/reading-data.
+    const documents = await ctx.db.query("tablename").collect();
+
+    // Arguments passed from the client are properties of the args object.
+    console.log(args.first, args.second);
+
+    // Write arbitrary JavaScript here: filter, aggregate, build derived data,
+    // remove non-public properties, or create new objects.
+    return documents;
   },
 });
-
-export default http;
 ```
 
-## Environment Variables
+Using this query function in a React component looks like:
 
-Set these in [Convex Dashboard](https://dashboard.convex.dev) → Settings →
-Environment Variables:
-
-```
-STRIPE_SECRET_KEY=sk_test_...
-STRIPE_WEBHOOK_SECRET=whsec_...
-APP_URL=http://localhost:5173
+```ts
+const data = useQuery(api.myFunctions.myQueryFunction, {
+  first: 10,
+  second: "hello",
+});
 ```
 
-The `APP_URL` is used for Stripe checkout success/cancel redirects.
+A mutation function looks like:
 
-## Component Tables
+```ts
+// convex/myFunctions.ts
+import { mutation } from "./_generated/server";
+import { v } from "convex/values";
 
-The `@convex-dev/stripe` component manages these tables:
+export const myMutationFunction = mutation({
+  // Validators for arguments.
+  args: {
+    first: v.string(),
+    second: v.string(),
+  },
 
-- `stripe.customers` - Stripe customer records
-- `stripe.subscriptions` - Subscription records with user/org linking
-- `stripe.payments` - One-time payment records
-- `stripe.invoices` - Invoice records
+  // Function implementation.
+  handler: async (ctx, args) => {
+    // Insert or modify documents in the database here.
+    // Mutations can also read from the database like queries.
+    // See https://docs.convex.dev/database/writing-data.
+    const message = { body: args.first, author: args.second };
+    const id = await ctx.db.insert("messages", message);
 
-Access via `components.stripe.public.*` queries.
+    // Optionally, return a value from your mutation.
+    return await ctx.db.get("messages", id);
+  },
+});
+```
 
-## Learn More
+Using this mutation function in a React component looks like:
 
-- [Component README](../../README.md)
-- [Example App README](../README.md)
-- [Convex Docs](https://docs.convex.dev)
-- [Stripe Docs](https://stripe.com/docs)
+```ts
+const mutation = useMutation(api.myFunctions.myMutationFunction);
+function handleButtonPress() {
+  // fire and forget, the most common way to use mutations
+  mutation({ first: "Hello!", second: "me" });
+  // OR
+  // use the result once the mutation has completed
+  mutation({ first: "Hello!", second: "me" }).then((result) =>
+    console.log(result),
+  );
+}
+```
+
+Use the Convex CLI to push your functions to a deployment. See everything
+the Convex CLI can do by running `npx convex -h` in your project root
+directory. To learn more, launch the docs with `npx convex docs`.

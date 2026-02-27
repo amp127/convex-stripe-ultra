@@ -1,30 +1,16 @@
-import { httpActionGeneric } from "convex/server";
 import StripeSDK from "stripe";
-import type {
-  MutationCtx,
-  ActionCtx,
-  HttpRouter,
-  RegisterRoutesConfig,
-  StripeEventHandlers,
-} from "./types.js";
+import type { ActionCtx } from "./types.js";
 import type { ComponentApi } from "../component/_generated/component.js";
 
-/**
- * Time window (in seconds) to check for recent subscriptions when processing
- * payment_intent.succeeded events. This helps avoid creating duplicate payment
- * records for subscription payments.
- */
-const RECENT_SUBSCRIPTION_WINDOW_SECONDS = 10 * 60; // 10 minutes
-
 export type StripeComponent = ComponentApi;
-
-export type { RegisterRoutesConfig, StripeEventHandlers };
 
 /**
  * Stripe Component Client
  *
  * Provides methods for managing Stripe customers, subscriptions, payments,
- * and webhooks through Convex.
+ * and billing portal via the @raideno/convex-stripe package. Webhooks and
+ * HTTP routes are registered with stripe.addHttpRoutes(http) from the
+ * component's stripe module.
  */
 export class StripeSubscriptions {
   private _apiKey: string;
@@ -45,7 +31,7 @@ export class StripeSubscriptions {
 
   /**
    * Update subscription quantity (for seat-based pricing).
-   * This will update both Stripe and the local database.
+   * Delegates to the component action; Stripe and DB stay in sync via webhooks.
    */
   async updateSubscriptionQuantity(
     ctx: ActionCtx,
@@ -58,13 +44,12 @@ export class StripeSubscriptions {
       stripeSubscriptionId: args.stripeSubscriptionId,
       quantity: args.quantity,
     });
-
     return null;
   }
 
   /**
    * Cancel a subscription either immediately or at period end.
-   * Updates both Stripe and the local database.
+   * Updates Stripe; the package syncs the local database via webhooks.
    */
   async cancelSubscription(
     ctx: ActionCtx,
@@ -76,185 +61,107 @@ export class StripeSubscriptions {
     const stripe = new StripeSDK(this.apiKey);
     const cancelAtPeriodEnd = args.cancelAtPeriodEnd ?? true;
 
-    let subscription: StripeSDK.Subscription;
-
     if (cancelAtPeriodEnd) {
-      subscription = await stripe.subscriptions.update(
-        args.stripeSubscriptionId,
-        {
-          cancel_at_period_end: true,
-        },
-      );
+      await stripe.subscriptions.update(args.stripeSubscriptionId, {
+        cancel_at_period_end: true,
+      });
     } else {
-      subscription = await stripe.subscriptions.cancel(
-        args.stripeSubscriptionId,
-      );
+      await stripe.subscriptions.cancel(args.stripeSubscriptionId);
     }
-
-    // Update local database immediately (don't wait for webhook)
-    const item = subscription.items.data[0];
-    await ctx.runMutation(this.component.private.handleSubscriptionUpdated, {
-      stripeSubscriptionId: subscription.id,
-      status: subscription.status,
-      currentPeriodEnd: item?.current_period_end || 0,
-      cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
-      cancelAt: subscription.cancel_at || undefined,
-      quantity: item?.quantity ?? 1,
-      priceId: item?.price?.id || undefined,
-      metadata: subscription.metadata || {},
-    });
-
     return null;
   }
 
   /**
    * Reactivate a subscription that was set to cancel at period end.
-   * Updates both Stripe and the local database.
    */
   async reactivateSubscription(
     ctx: ActionCtx,
-    args: {
-      stripeSubscriptionId: string;
-    },
+    args: { stripeSubscriptionId: string },
   ) {
     const stripe = new StripeSDK(this.apiKey);
-
-    // Reactivate by setting cancel_at_period_end to false
-    const subscription = await stripe.subscriptions.update(
-      args.stripeSubscriptionId,
-      {
-        cancel_at_period_end: false,
-      },
-    );
-
-    // Update local database immediately
-    const item = subscription.items.data[0];
-    await ctx.runMutation(this.component.private.handleSubscriptionUpdated, {
-      stripeSubscriptionId: subscription.id,
-      status: subscription.status,
-      currentPeriodEnd: item?.current_period_end || 0,
-      cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
-      cancelAt: subscription.cancel_at || undefined,
-      quantity: item?.quantity ?? 1,
-      priceId: item?.price?.id || undefined,
-      metadata: subscription.metadata || {},
+    await stripe.subscriptions.update(args.stripeSubscriptionId, {
+      cancel_at_period_end: false,
     });
-
     return null;
   }
 
-  // ============================================================================
-  // CHECKOUT & PAYMENTS
-  // ============================================================================
-
   /**
-   * Create a Stripe Checkout session for one-time payments or subscriptions.
+   * Create a Stripe Checkout session for subscription or one-time payment.
+   * Uses entityId (e.g. userId or orgId) for customer lookup/creation.
    */
   async createCheckoutSession(
     ctx: ActionCtx,
     args: {
+      entityId: string;
       priceId: string;
-      customerId?: string;
       mode: "payment" | "subscription" | "setup";
       successUrl: string;
       cancelUrl: string;
       quantity?: number;
       metadata?: Record<string, string>;
-      /** Metadata to attach to the subscription (only for mode: "subscription") */
       subscriptionMetadata?: Record<string, string>;
-      /** Metadata to attach to the payment intent (only for mode: "payment") */
       paymentIntentMetadata?: Record<string, string>;
+      /** For mode "payment": reference ID (e.g. order ID). */
+      referenceId?: string;
     },
   ) {
-    const stripe = new StripeSDK(this.apiKey);
-
-    const sessionParams: StripeSDK.Checkout.SessionCreateParams = {
-      mode: args.mode,
-      line_items: [
-        {
-          price: args.priceId,
-          quantity: args.quantity ?? 1,
-        },
-      ],
-      success_url: args.successUrl,
-      cancel_url: args.cancelUrl,
-      metadata: args.metadata || {},
-    };
-
-    if (args.customerId) {
-      sessionParams.customer = args.customerId;
+    if (args.mode === "subscription") {
+      const result = await ctx.runAction(this.component.public.subscribe, {
+        entityId: args.entityId,
+        priceId: args.priceId,
+        successUrl: args.successUrl,
+        cancelUrl: args.cancelUrl,
+        quantity: args.quantity,
+        metadata: args.metadata,
+        subscriptionData: args.subscriptionMetadata
+          ? { metadata: args.subscriptionMetadata }
+          : undefined,
+      });
+      return { sessionId: result.sessionId, url: result.url };
     }
-
-    // Add subscription metadata for linking userId/orgId
-    if (args.mode === "subscription" && args.subscriptionMetadata) {
-      sessionParams.subscription_data = {
-        metadata: args.subscriptionMetadata,
-      };
+    if (args.mode === "payment") {
+      const result = await ctx.runAction(this.component.public.pay, {
+        entityId: args.entityId,
+        referenceId: args.referenceId ?? args.entityId,
+        lineItems: [{ price: args.priceId, quantity: args.quantity ?? 1 }],
+        successUrl: args.successUrl,
+        cancelUrl: args.cancelUrl,
+        metadata: args.paymentIntentMetadata ?? args.metadata,
+      });
+      return { sessionId: result.sessionId, url: result.url };
     }
-
-    // Add payment intent metadata for linking userId/orgId
-    if (args.mode === "payment" && args.paymentIntentMetadata) {
-      sessionParams.payment_intent_data = {
-        metadata: args.paymentIntentMetadata,
-      };
-    }
-
-    const session = await stripe.checkout.sessions.create(sessionParams);
-
-    return {
-      sessionId: session.id,
-      url: session.url,
-    };
+    throw new Error(
+      "createCheckoutSession with mode 'setup' is not supported; use Stripe API directly if needed.",
+    );
   }
 
   /**
-   * Create a new Stripe customer.
-   *
-   * @param args.idempotencyKey - Optional key to prevent duplicate customer creation.
-   *   If two requests come in with the same key, Stripe returns the same customer.
-   *   Recommended: pass `userId` to prevent race conditions.
+   * Create or get a Stripe customer for the given entity.
+   * Returns the Stripe customer ID.
    */
   async createCustomer(
     ctx: ActionCtx,
     args: {
+      entityId: string;
       email?: string;
       name?: string;
       metadata?: Record<string, string>;
-      idempotencyKey?: string;
     },
   ) {
-    const stripe = new StripeSDK(this.apiKey);
-
-    // Use idempotency key to prevent duplicate customers from race conditions
-    const requestOptions = args.idempotencyKey
-      ? { idempotencyKey: `create_customer_${args.idempotencyKey}` }
-      : undefined;
-
-    const customer = await stripe.customers.create(
+    const customerId = await ctx.runAction(
+      this.component.public.createOrUpdateCustomer,
       {
+        entityId: args.entityId,
         email: args.email,
         name: args.name,
         metadata: args.metadata,
       },
-      requestOptions,
     );
-
-    // Store in our database
-    await ctx.runMutation(this.component.public.createOrUpdateCustomer, {
-      stripeCustomerId: customer.id,
-      email: args.email,
-      name: args.name,
-      metadata: args.metadata,
-    });
-
-    return {
-      customerId: customer.id,
-    };
+    return { customerId };
   }
 
   /**
-   * Get or create a Stripe customer for a user.
-   * Checks existing customers, subscriptions, and payments to avoid duplicates.
+   * Get or create a Stripe customer for a user (entityId = userId).
    */
   async getOrCreateCustomer(
     ctx: ActionCtx,
@@ -264,7 +171,6 @@ export class StripeSubscriptions {
       name?: string;
     },
   ) {
-    // Check the customers table directly by userId (uses by_user_id index)
     const existingByUserId = await ctx.runQuery(
       this.component.public.getCustomerByUserId,
       { userId: args.userId },
@@ -276,7 +182,6 @@ export class StripeSubscriptions {
       };
     }
 
-    // Fallback: check by email (uses by_email index)
     if (args.email) {
       const existingByEmail = await ctx.runQuery(
         this.component.public.getCustomerByEmail,
@@ -290,395 +195,103 @@ export class StripeSubscriptions {
       }
     }
 
-    // Check if customer exists by userId in subscriptions
     const existingSubs = await ctx.runQuery(
       this.component.public.listSubscriptionsByUserId,
       { userId: args.userId },
     );
-
     if (existingSubs.length > 0) {
-      return { customerId: existingSubs[0].stripeCustomerId, isNew: false };
+      return {
+        customerId: existingSubs[0].stripeCustomerId,
+        isNew: false,
+      };
     }
 
-    // Check existing payments
     const existingPayments = await ctx.runQuery(
       this.component.public.listPaymentsByUserId,
       { userId: args.userId },
     );
-
     if (existingPayments.length > 0 && existingPayments[0].stripeCustomerId) {
-      return { customerId: existingPayments[0].stripeCustomerId, isNew: false };
+      return {
+        customerId: existingPayments[0].stripeCustomerId,
+        isNew: false,
+      };
     }
 
-    // Create a new customer with idempotency key to prevent race conditions
-    const result = await this.createCustomer(ctx, {
-      email: args.email,
-      name: args.name,
-      metadata: { userId: args.userId },
-      idempotencyKey: args.userId,
-    });
-
-    return { customerId: result.customerId, isNew: true };
+    const customerId = await ctx.runAction(
+      this.component.public.createOrUpdateCustomer,
+      {
+        entityId: args.userId,
+        email: args.email,
+        name: args.name,
+        metadata: { userId: args.userId },
+      },
+    );
+    return { customerId, isNew: true };
   }
 
   /**
-   * Create a Stripe Customer Portal session for managing subscriptions.
+   * Create a Stripe Customer Portal session (manage subscription, payment methods).
+   * Uses entityId (e.g. userId).
    */
   async createCustomerPortalSession(
     ctx: ActionCtx,
-    args: {
-      customerId: string;
-      returnUrl: string;
-    },
+    args: { entityId: string; returnUrl: string },
   ) {
-    const stripe = new StripeSDK(this.apiKey);
-
-    const session = await stripe.billingPortal.sessions.create({
-      customer: args.customerId,
-      return_url: args.returnUrl,
+    const result = await ctx.runAction(this.component.public.portal, {
+      entityId: args.entityId,
+      returnUrl: args.returnUrl,
     });
-
-    return {
-      url: session.url,
-    };
+    return { url: result.url };
   }
 
-  // ============================================================================
-  // WEBHOOK REGISTRATION
-  // ============================================================================
-}
-/**
- * Register webhook routes with the HTTP router.
- * This simplifies webhook setup by handling signature verification
- * and routing events to the appropriate handlers automatically.
- *
- * @param http - The HTTP router instance
- * @param config - Optional configuration for webhook path and event handlers
- *
- * @example
- * ```typescript
- * // convex/http.ts
- * import { httpRouter } from "convex/server";
- * import { stripe } from "./stripe";
- *
- * const http = httpRouter();
- *
- * stripe.registerRoutes(http, {
- *   events: {
- *     "customer.subscription.updated": async (ctx, event) => {
- *       // Your custom logic after default handling
- *       console.log("Subscription updated:", event.data.object);
- *     },
- *   },
- * });
- *
- * export default http;
- * ```
- */
-export function registerRoutes(
-  http: HttpRouter,
-  component: ComponentApi,
-  config?: RegisterRoutesConfig,
-) {
-  const webhookPath = config?.webhookPath ?? "/stripe/webhook";
-  const eventHandlers = config?.events ?? {};
+  /**
+   * Create a Stripe Connect account for a seller (Connect).
+   */
+  async createConnectAccount(
+    ctx: ActionCtx,
+    args: {
+      entityId: string;
+      email?: string;
+      params?: Record<string, unknown>;
+    },
+  ) {
+    const account = await ctx.runAction(
+      this.component.public.createConnectAccount,
+      {
+        entityId: args.entityId,
+        email: args.email,
+        params: args.params,
+      },
+    );
+    return account;
+  }
 
-  http.route({
-    path: webhookPath,
-    method: "POST",
-    handler: httpActionGeneric(async (ctx, req) => {
-      const webhookSecret =
-        config?.STRIPE_WEBHOOK_SECRET || process.env.STRIPE_WEBHOOK_SECRET;
-
-      if (!webhookSecret) {
-        console.error("❌ STRIPE_WEBHOOK_SECRET is not set");
-        return new Response("Webhook secret not configured", { status: 500 });
-      }
-
-      const signature = req.headers.get("stripe-signature");
-      if (!signature) {
-        console.error("❌ No Stripe signature in headers");
-        return new Response("No signature provided", { status: 400 });
-      }
-
-      const body = await req.text();
-
-      const apiKey = config?.STRIPE_SECRET_KEY || process.env.STRIPE_SECRET_KEY;
-
-      if (!apiKey) {
-        console.error("❌ STRIPE_SECRET_KEY is not set");
-        return new Response("Stripe secret key not configured", {
-          status: 500,
-        });
-      }
-
-      const stripe = new StripeSDK(apiKey);
-
-      // Verify webhook signature
-      let event: StripeSDK.Event;
-      try {
-        event = await stripe.webhooks.constructEventAsync(
-          body,
-          signature,
-          webhookSecret,
-        );
-      } catch (err) {
-        console.error("❌ Webhook signature verification failed:", err);
-        return new Response(
-          `Webhook signature verification failed: ${err instanceof Error ? err.message : String(err)}`,
-          { status: 400 },
-        );
-      }
-
-      // Process the event with default handlers
-      try {
-        await processEvent(ctx, component, event, stripe);
-
-        // Call generic event handler if provided
-        if (config?.onEvent) {
-          await config.onEvent(ctx, event);
-        }
-
-        // Call custom event handler if provided
-        const eventType = event.type;
-        const customHandler:
-          | ((ctx: any, event: any) => Promise<void>)
-          | undefined = eventHandlers[eventType] as any;
-        if (customHandler) {
-          await customHandler(ctx, event);
-        }
-      } catch (error) {
-        console.error("❌ Error processing webhook:", error);
-        return new Response("Error processing webhook", { status: 500 });
-      }
-
-      return new Response(JSON.stringify({ received: true }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    }),
-  });
-}
-
-/**
- * Internal method to process Stripe webhook events with default handling.
- * This handles the database syncing for all supported event types.
- */
-async function processEvent(
-  ctx: MutationCtx | ActionCtx,
-  component: ComponentApi,
-  event: StripeSDK.Event,
-  stripe: StripeSDK,
-): Promise<void> {
-  switch (event.type) {
-    case "customer.created":
-    case "customer.updated": {
-      const customer = event.data.object as StripeSDK.Customer;
-      const handler =
-        event.type === "customer.created"
-          ? component.private.handleCustomerCreated
-          : component.private.handleCustomerUpdated;
-
-      await ctx.runMutation(handler, {
-        stripeCustomerId: customer.id,
-        email: customer.email || undefined,
-        name: customer.name || undefined,
-        metadata: customer.metadata,
-      });
-      break;
-    }
-
-    case "customer.subscription.created": {
-      const subscription = event.data.object as StripeSDK.Subscription;
-      const item = subscription.items.data[0];
-
-      await ctx.runMutation(component.private.handleSubscriptionCreated, {
-        stripeSubscriptionId: subscription.id,
-        stripeCustomerId: subscription.customer as string,
-        status: subscription.status,
-        currentPeriodEnd: item?.current_period_end || 0,
-        cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
-        cancelAt: subscription.cancel_at ?? undefined,
-        quantity: subscription.items.data[0]?.quantity ?? 1,
-        priceId: item?.price?.id || "",
-        metadata: subscription.metadata || {},
-      });
-      break;
-    }
-
-    case "customer.subscription.updated": {
-      const subscription = event.data.object as StripeSDK.Subscription;
-      const item = subscription.items.data[0];
-
-      await ctx.runMutation(component.private.handleSubscriptionUpdated, {
-        stripeSubscriptionId: subscription.id,
-        status: subscription.status,
-        currentPeriodEnd: item?.current_period_end || 0,
-        cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
-        cancelAt: subscription.cancel_at ?? undefined,
-        quantity: subscription.items.data[0]?.quantity ?? 1,
-        priceId: item?.price?.id || undefined,
-        metadata: subscription.metadata || {},
-      });
-      break;
-    }
-
-    case "customer.subscription.deleted": {
-      const subscription = event.data.object as StripeSDK.Subscription;
-      const item = subscription.items.data[0];
-      await ctx.runMutation(component.private.handleSubscriptionDeleted, {
-        stripeSubscriptionId: subscription.id,
-        cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
-        currentPeriodEnd: item?.current_period_end ?? undefined,
-        cancelAt: subscription.cancel_at ?? undefined,
-      });
-      break;
-    }
-
-    case "checkout.session.completed": {
-      const session = event.data.object as StripeSDK.Checkout.Session;
-      await ctx.runMutation(component.private.handleCheckoutSessionCompleted, {
-        stripeCheckoutSessionId: session.id,
-        stripeCustomerId: session.customer
-          ? (session.customer as string)
-          : undefined,
-        mode: session.mode || "payment",
-        metadata: session.metadata || undefined,
-      });
-
-      // For payment mode, link the payment to the customer if we have both
-      if (
-        session.mode === "payment" &&
-        session.customer &&
-        session.payment_intent
-      ) {
-        await ctx.runMutation(component.private.updatePaymentCustomer, {
-          stripePaymentIntentId: session.payment_intent as string,
-          stripeCustomerId: session.customer as string,
-        });
-      }
-
-      // For subscription mode, fetch and store the latest invoice
-      if (session.mode === "subscription" && session.subscription) {
-        try {
-          const subscription = await stripe.subscriptions.retrieve(
-            session.subscription as string,
-          );
-          if (subscription.latest_invoice) {
-            const invoice = await stripe.invoices.retrieve(
-              subscription.latest_invoice as string,
-            );
-            await ctx.runMutation(component.private.handleInvoiceCreated, {
-              stripeInvoiceId: invoice.id,
-              stripeCustomerId: invoice.customer as string,
-              stripeSubscriptionId: subscription.id,
-              status: invoice.status || "paid",
-              amountDue: invoice.amount_due,
-              amountPaid: invoice.amount_paid,
-              created: invoice.created,
-            });
-          }
-        } catch (err) {
-          console.error("Error fetching invoice for subscription:", err);
-        }
-      }
-      break;
-    }
-
-    case "invoice.created":
-    case "invoice.finalized": {
-      const invoice = event.data.object as StripeSDK.Invoice;
-      await ctx.runMutation(component.private.handleInvoiceCreated, {
-        stripeInvoiceId: invoice.id,
-        stripeCustomerId: invoice.customer as string,
-        stripeSubscriptionId: (invoice as any).subscription as
-          | string
-          | undefined,
-        status: invoice.status || "open",
-        amountDue: invoice.amount_due,
-        amountPaid: invoice.amount_paid,
-        created: invoice.created,
-      });
-      break;
-    }
-
-    case "invoice.paid":
-    case "invoice.payment_succeeded": {
-      const invoice = event.data.object as any;
-      await ctx.runMutation(component.private.handleInvoicePaid, {
-        stripeInvoiceId: invoice.id,
-        amountPaid: invoice.amount_paid,
-      });
-      break;
-    }
-
-    case "invoice.payment_failed": {
-      const invoice = event.data.object as StripeSDK.Invoice;
-      await ctx.runMutation(component.private.handleInvoicePaymentFailed, {
-        stripeInvoiceId: invoice.id,
-      });
-      break;
-    }
-
-    case "payment_intent.succeeded": {
-      const paymentIntent = event.data.object as any;
-
-      // Check if this is a subscription payment
-      if (paymentIntent.invoice) {
-        try {
-          const invoice = await stripe.invoices.retrieve(
-            paymentIntent.invoice as string,
-          );
-          if ((invoice as any).subscription) {
-            console.log(
-              "⏭️ Skipping payment_intent.succeeded - subscription payment",
-            );
-            break;
-          }
-        } catch (err) {
-          console.error("Error checking invoice:", err);
-        }
-      }
-
-      // Check for recent subscriptions
-      if (paymentIntent.customer) {
-        const recentSubscriptions = await ctx.runQuery(
-          component.private.listSubscriptionsWithCreationTime,
-          {
-            stripeCustomerId: paymentIntent.customer as string,
-          },
-        );
-
-        const recentWindowStartMs =
-          Date.now() - RECENT_SUBSCRIPTION_WINDOW_SECONDS * 1000;
-        const recentSubscription = recentSubscriptions.find(
-          (sub) => sub._creationTime > recentWindowStartMs,
-        );
-
-        if (recentSubscription) {
-          console.log(
-            "⏭️ Skipping payment_intent.succeeded - recent subscription",
-          );
-          break;
-        }
-      }
-
-      await ctx.runMutation(component.private.handlePaymentIntentSucceeded, {
-        stripePaymentIntentId: paymentIntent.id,
-        stripeCustomerId: paymentIntent.customer
-          ? (paymentIntent.customer as string)
-          : undefined,
-        amount: paymentIntent.amount,
-        currency: paymentIntent.currency,
-        status: paymentIntent.status,
-        created: paymentIntent.created,
-        metadata: paymentIntent.metadata || {},
-      });
-      break;
-    }
-
-    default:
-      console.log(`ℹ️ Unhandled event type: ${event.type}`);
+  /**
+   * Create a Stripe Connect Account Link for onboarding (Connect).
+   */
+  async createConnectAccountLink(
+    ctx: ActionCtx,
+    args: {
+      accountId: string;
+      refreshUrl: string;
+      returnUrl: string;
+      failureUrl?: string;
+      type?: "account_onboarding" | "account_update";
+      params?: Record<string, unknown>;
+    },
+  ) {
+    const result = await ctx.runAction(
+      this.component.public.createConnectAccountLink,
+      {
+        accountId: args.accountId,
+        refreshUrl: args.refreshUrl,
+        returnUrl: args.returnUrl,
+        failureUrl: args.failureUrl,
+        type: args.type,
+        params: args.params,
+      },
+    );
+    return { url: result.url };
   }
 }
 

@@ -10,6 +10,7 @@
 
 import type * as http from "../http.js";
 import type * as stripe from "../stripe.js";
+import type * as stripeInit from "../stripeInit.js";
 
 import type {
   ApiFromModules,
@@ -20,6 +21,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   http: typeof http;
   stripe: typeof stripe;
+  stripeInit: typeof stripeInit;
 }>;
 
 /**
@@ -48,6 +50,4 @@ export declare const internal: FilterApi<
   FunctionReference<any, "internal">
 >;
 
-export declare const components: {
-  stripe: import("@convex-dev/stripe/_generated/component.js").ComponentApi<"stripe">;
-};
+export declare const components: {};
